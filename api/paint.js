@@ -15,7 +15,9 @@ module.exports = async (req, res) => {
       x >= 0 && x < state.w && y >= 0 && y < state.h &&
       Number.isInteger(c) && c >= EMPTY && c < PALETTE.length
     ) {
-      valid.push({ off: y * state.w + x, ch: c === EMPTY ? "." : String(c) });
+      // one char per cell: '.' = empty, then '0','1',… ('0'+index — indexes
+      // past 9 become ':',';','<'… so this works beyond ten colors)
+      valid.push({ off: y * state.w + x, ch: c === EMPTY ? "." : String.fromCharCode(48 + c) });
     }
   }
   await paintCells(valid);
