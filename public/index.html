@@ -1,0 +1,624 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<title>Pixel-Canvas — retromania</title>
+<style>
+  :root {
+    --bg: #14130f;
+    --panel: #1d1c17;
+    --empty: #ffffff;      /* empty cell (white canvas) */
+    --line: #2a2922;
+    --text: #cfe0a8;
+    --accent: #2d68b2;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    overflow: hidden; touch-action: none;
+  }
+  body { display: flex; flex-direction: column; }
+  img { image-rendering: pixelated; }
+
+  /* Host-only controls (choosing images, timer, clear) — hidden for players. */
+  body:not(.admin) .adminonly { display: none !important; }
+
+  /* ---- Header ---- */
+  header {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 12px; background: var(--panel); border-bottom: 1px solid var(--line);
+  }
+  header h1 { font-size: 13px; margin: 0; letter-spacing: 1px; color: var(--accent); text-transform: uppercase; white-space: nowrap; display: flex; align-items: center; gap: 8px; }
+  header h1 img { height: 24px; width: auto; }
+  #me { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+  #me img { width: 24px; height: 24px; border-radius: 5px; background:#fff; }
+  #roster { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+  .count { font-size: 12px; opacity: .8; white-space: nowrap; }
+  .joinbtn {
+    font: inherit; font-size: 12px; background: transparent; color: var(--text);
+    border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; cursor: pointer;
+  }
+  .taskbtn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+  /* ---- Canvas + player panel ---- */
+  #stage { flex: 1; display: flex; min-height: 0; }
+  #canvaswrap { flex: 1; display: flex; align-items: center; justify-content: center; padding: 10px; min-width: 0; }
+  #players { width: clamp(96px, 28vw, 188px); flex: none; background: transparent; overflow-y: auto; padding: 12px 10px; }
+  #players h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; opacity: .6; margin: 0 0 12px; }
+  #playerlist { display: flex; flex-direction: column; gap: 10px; }
+  .player { display: flex; align-items: center; gap: 8px; }
+  .player img { width: 30px; height: 30px; border-radius: 7px; background: #fff; flex: none; }
+  .player b { font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .player.you b { color: var(--accent); }
+  .player.you b::after { content: " (du)"; opacity: .5; font-size: 11px; }
+  #frame { position: relative; line-height: 0; border: 1px solid var(--line); box-shadow: 0 0 0 4px #000, 0 10px 40px rgba(0,0,0,.6); }
+  #canvas { background: var(--empty); image-rendering: pixelated; display: block; touch-action: none; }
+  #grid { position: absolute; top: 0; left: 0; pointer-events: none; }
+
+  /* ---- Reference task panel (left) + timer ---- */
+  #reference {
+    width: clamp(130px, 26vw, 320px); flex: none; background: var(--panel);
+    border-right: 1px solid var(--line); display: flex; flex-direction: column;
+    gap: 12px; padding: 12px 10px; overflow-y: auto;
+  }
+  #reference.hide { display: none; }
+  #reference h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; opacity: .6; margin: 0; }
+  #refimg-wrap { background: #000; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; line-height: 0; }
+  #refimg { width: 100%; height: auto; display: block; image-rendering: auto; }
+  #timerbox { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  #timer { font-size: clamp(30px, 7vw, 46px); font-weight: 700; letter-spacing: 2px; font-variant-numeric: tabular-nums; }
+  #timer.warn { color: #e8402a; }
+  #timer-controls { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+  .ctrlbtn { font: inherit; font-size: 13px; background: var(--accent); color: #fff; border: none; border-radius: 8px; padding: 8px 12px; cursor: pointer; }
+  .ctrlbtn.alt { background: transparent; color: var(--text); border: 1px solid var(--line); }
+  #refClose { margin-top: auto; }
+
+  @media (max-width: 760px) {
+    body.task-open #players { display: none; }
+    #reference { width: clamp(112px, 36vw, 230px); }
+  }
+
+  /* ---- Palette ---- */
+  .palette {
+    display: flex; gap: 8px; justify-content: center; align-items: center;
+    padding: 12px; padding-bottom: max(12px, env(safe-area-inset-bottom));
+    background: var(--panel); border-top: 1px solid var(--line); flex-wrap: wrap;
+  }
+  .swatch { width: 44px; height: 44px; border-radius: 8px; border: 2px solid #000; cursor: pointer; position: relative; transition: transform .07s; }
+  .swatch.sel { transform: translateY(-6px) scale(1.08); box-shadow: 0 0 0 2px var(--accent); }
+  .swatch.eraser { background: #fff url("/eraser.webp") center / 80% no-repeat; }
+
+  /* ---- Join lobby ---- */
+  #lobby {
+    position: fixed; inset: 0; z-index: 20; background: var(--bg);
+    display: flex; flex-direction: column; align-items: center; gap: 18px;
+    padding: 28px 20px max(20px, env(safe-area-inset-bottom)); overflow-y: auto;
+  }
+  #lobby.hide { display: none; }
+  #lobby h2 { color: var(--accent); font-size: 18px; letter-spacing: 1px; margin: 6px 0 0; text-transform: uppercase; display: flex; align-items: center; gap: 10px; }
+  #lobby h2 img { height: 40px; width: auto; }
+  #lobby .sub { font-size: 13px; opacity: .7; text-align: center; margin: -8px 0 4px; }
+  .icongrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; width: 100%; max-width: 360px; }
+  .icon {
+    background: var(--bg); border: 3px solid var(--line); border-radius: 14px; padding: 10px;
+    display: flex; align-items: center; justify-content: center; cursor: pointer;
+    transition: transform .08s; position: relative;
+  }
+  .icon img { width: 100%; max-width: 92px; aspect-ratio: 1; object-fit: contain; }
+  .icon.sel { border-color: var(--accent); transform: translateY(-4px) scale(1.04); box-shadow: 0 0 0 3px var(--accent), 0 8px 20px rgba(0,0,0,.5); }
+  #nameInput {
+    width: 100%; max-width: 360px; font: inherit; font-size: 16px; text-align: center;
+    background: var(--panel); color: var(--text); border: 2px solid var(--line);
+    border-radius: 10px; padding: 12px 14px; outline: none;
+  }
+  #nameInput:focus { border-color: var(--accent); }
+  #joinBtn {
+    width: 100%; max-width: 360px; font: inherit; font-size: 16px; font-weight: 700;
+    letter-spacing: 1px; text-transform: uppercase; color: #fff; background: var(--accent);
+    border: none; border-radius: 10px; padding: 14px; cursor: pointer;
+  }
+  #joinBtn:disabled { opacity: .35; cursor: not-allowed; }
+
+  /* ---- QR overlay ---- */
+  #overlay { position: fixed; inset: 0; background: rgba(0,0,0,.85); display: none; flex-direction: column; align-items: center; justify-content: center; gap: 18px; z-index: 30; padding: 24px; text-align: center; }
+  #overlay.show { display: flex; }
+  #qr { background: #fff; padding: 14px; border-radius: 10px; min-width: 180px; min-height: 180px; }
+  #overlay .joinbtn { font-size: 14px; padding: 8px 16px; }
+
+  /* ---- Time-up modal ---- */
+  #timeup { position: fixed; inset: 0; background: rgba(0,0,0,.9); display: none; flex-direction: column; align-items: center; justify-content: center; gap: 16px; z-index: 40; padding: 24px; text-align: center; }
+  #timeup.show { display: flex; }
+  #timeup .big { font-size: clamp(30px, 9vw, 64px); font-weight: 700; letter-spacing: 2px; color: #e8402a; text-transform: uppercase; }
+  #timeup .sub2 { font-size: 15px; opacity: .75; }
+  #timeup .rating { font-size: clamp(34px, 10vw, 64px); font-weight: 700; color: var(--accent); font-variant-numeric: tabular-nums; min-height: 1.1em; }
+  #timeup .rating.loading { font-size: 16px; font-weight: 400; color: var(--text); opacity: .8; letter-spacing: 1px; }
+  #timeup .evalfb { font-size: 16px; max-width: 440px; line-height: 1.45; opacity: .9; }
+  #timeup .joinbtn { font-size: 15px; padding: 10px 20px; }
+</style>
+</head>
+<body>
+  <!-- Join lobby (shown first after scanning the QR) -->
+  <div id="lobby">
+    <h2><img src="/logo.webp" alt="" />Pixel-Canvas</h2>
+    <div class="sub">Wähle deinen Charakter & gib deinen Namen ein</div>
+    <div class="icongrid" id="icongrid"></div>
+    <input id="nameInput" type="text" maxlength="24" placeholder="Dein Name" autocomplete="off" />
+    <button id="joinBtn" disabled>Beitreten</button>
+  </div>
+
+  <!-- Canvas app -->
+  <header>
+    <h1><img src="/logo.webp" alt="" />Pixel-Canvas</h1>
+    <span id="me"></span>
+    <div id="roster">
+      <button class="joinbtn taskbtn adminonly" data-task="1">Bild 1</button>
+      <button class="joinbtn taskbtn adminonly" data-task="2">Bild 2</button>
+      <span class="count" id="count">– online</span>
+      <button class="joinbtn" id="showJoin">QR</button>
+    </div>
+  </header>
+
+  <div id="stage">
+    <aside id="reference" class="hide">
+      <h3>Vorlage</h3>
+      <div id="refimg-wrap"><img id="refimg" alt="Vorlage" /></div>
+      <div id="timerbox">
+        <div id="timer">03:00</div>
+        <div id="timer-controls" class="adminonly">
+          <button class="ctrlbtn" id="timerStart">▶ Start</button>
+          <button class="ctrlbtn alt" id="timerReset">↺ Reset</button>
+        </div>
+      </div>
+      <button class="ctrlbtn alt adminonly" id="canvasReset">🗑 Canvas leeren</button>
+      <button class="ctrlbtn alt adminonly" id="refClose">✕ Schließen</button>
+    </aside>
+    <div id="canvaswrap">
+      <div id="frame">
+        <canvas id="canvas"></canvas>
+        <canvas id="grid"></canvas>
+      </div>
+    </div>
+    <aside id="players">
+      <h3>Spieler·innen</h3>
+      <div id="playerlist"></div>
+    </aside>
+  </div>
+
+  <div class="palette" id="palette"></div>
+
+  <div id="overlay">
+    <div id="qr">…</div>
+    <button class="joinbtn" id="hideJoin">Schließen</button>
+  </div>
+
+  <div id="timeup">
+    <div class="big">⏰ Zeit ist um!</div>
+    <div class="sub2">Die Zeit ist vorbei.</div>
+    <div id="rating" class="rating"></div>
+    <div id="evalFeedback" class="evalfb"></div>
+    <button class="joinbtn" id="timeupClose">Schließen</button>
+  </div>
+
+<script>
+let W = 64, H = 64, PALETTE = [], EMPTY = -1, ICONS = [];
+let grid = [];
+let current = 0;          // selected palette index (EMPTY = eraser)
+let cellPx = 10;          // canvas pixels per cell
+let me = null;            // { name, icon }  current player
+let pickedIcon = null;    // selected icon src in the lobby
+
+// ---- Admin token -------------------------------------------------------------
+// The presenter opens /?admin=<token>. The token is stashed in localStorage and
+// removed from the URL so it never shows on the beamer or in the QR code.
+const bootParams = new URLSearchParams(location.search);
+const urlAdmin = bootParams.get("admin");
+if (urlAdmin !== null) {
+  localStorage.setItem("pc_admin", urlAdmin);
+  bootParams.delete("admin");
+  const q = bootParams.toString();
+  history.replaceState(null, "", location.pathname + (q ? "?" + q : ""));
+}
+const ADMIN_TOKEN = localStorage.getItem("pc_admin") || "";
+let isAdmin = false;
+
+// Countdown length the host uses when opening a task; override with ?t=<seconds>.
+const TASK_SECONDS = Math.max(5, parseInt(bootParams.get("t"), 10) || 180);
+
+// Stable per-device id for the presence roster.
+let clientId = localStorage.getItem("pc_id");
+if (!clientId) {
+  clientId = Math.random().toString(36).slice(2, 12);
+  localStorage.setItem("pc_id", clientId);
+}
+
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+const gridCanvas = document.getElementById("grid");
+const gctx = gridCanvas.getContext("2d");
+
+function colorOf(c) { return c === EMPTY ? null : PALETTE[c]; }
+
+function drawCell(x, y) {
+  const col = colorOf(grid[y * W + x]);
+  if (col === null) ctx.clearRect(x * cellPx, y * cellPx, cellPx, cellPx);
+  else { ctx.fillStyle = col; ctx.fillRect(x * cellPx, y * cellPx, cellPx, cellPx); }
+}
+
+function redrawAll() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  for (let y = 0; y < H; y++)
+    for (let x = 0; x < W; x++)
+      if (grid[y * W + x] !== EMPTY) drawCell(x, y);
+}
+
+function layout() {
+  const wrap = document.getElementById("canvaswrap");
+  const rect = wrap.getBoundingClientRect();
+  // Fit the W×H grid into the available box, keeping square cells.
+  const availW = Math.max(60, rect.width - 4);
+  const availH = Math.max(60, rect.height - 4);
+  cellPx = Math.max(4, Math.floor(Math.min(availW / W, availH / H)));
+  const pxW = cellPx * W, pxH = cellPx * H;
+  canvas.width = pxW; canvas.height = pxH;
+  canvas.style.width = pxW + "px"; canvas.style.height = pxH + "px";
+  redrawAll();
+  drawGrid();
+}
+
+// Semitransparent grey grid on a separate overlay canvas (one line per cell).
+function drawGrid() {
+  const pxW = canvas.width, pxH = canvas.height;
+  gridCanvas.width = pxW; gridCanvas.height = pxH;
+  gridCanvas.style.width = pxW + "px"; gridCanvas.style.height = pxH + "px";
+  gctx.clearRect(0, 0, pxW, pxH);
+  gctx.strokeStyle = "rgba(120,120,120,0.28)";
+  gctx.lineWidth = 1;
+  gctx.beginPath();
+  for (let i = 0; i <= W; i++) {
+    const p = Math.round(i * cellPx) + 0.5;
+    gctx.moveTo(p, 0); gctx.lineTo(p, pxH);
+  }
+  for (let i = 0; i <= H; i++) {
+    const p = Math.round(i * cellPx) + 0.5;
+    gctx.moveTo(0, p); gctx.lineTo(pxW, p);
+  }
+  gctx.stroke();
+}
+
+// ---- Painting --------------------------------------------------------------
+// Optimistic: draw + POST immediately; the poll loop won't overwrite a cell we
+// painted in the last 2.5s, so our own strokes never flicker.
+const pending = new Map(); // cellIndex -> { c, ts }
+let painting = false, lastKey = "";
+function cellFromEvent(e) {
+  const r = canvas.getBoundingClientRect();
+  const x = Math.floor((e.clientX - r.left) / r.width * W);
+  const y = Math.floor((e.clientY - r.top) / r.height * H);
+  if (x < 0 || x >= W || y < 0 || y >= H) return null;
+  return { x, y };
+}
+function paintAt(x, y) {
+  const key = x + "," + y;
+  if (key === lastKey) return;
+  lastKey = key;
+  if (grid[y * W + x] === current) return;
+  grid[y * W + x] = current;
+  pending.set(y * W + x, { c: current, ts: Date.now() });
+  drawCell(x, y);
+  fetch("/api/paint", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ x, y, c: current }), keepalive: true }).catch(() => {});
+}
+canvas.addEventListener("pointerdown", (e) => {
+  e.preventDefault(); painting = true; lastKey = "";
+  canvas.setPointerCapture(e.pointerId);
+  const c = cellFromEvent(e); if (c) paintAt(c.x, c.y);
+});
+canvas.addEventListener("pointermove", (e) => {
+  if (!painting) return; e.preventDefault();
+  const c = cellFromEvent(e); if (c) paintAt(c.x, c.y);
+});
+function stop() { painting = false; lastKey = ""; }
+canvas.addEventListener("pointerup", stop);
+canvas.addEventListener("pointercancel", stop);
+
+// ---- Palette UI ------------------------------------------------------------
+function buildPalette() {
+  const wrap = document.getElementById("palette");
+  wrap.innerHTML = "";
+  PALETTE.forEach((col, i) => {
+    const b = document.createElement("div");
+    b.className = "swatch" + (i === current ? " sel" : "");
+    b.style.background = col;
+    b.onclick = () => select(i);
+    wrap.appendChild(b);
+  });
+  const er = document.createElement("div");
+  er.className = "swatch eraser" + (current === EMPTY ? " sel" : "");
+  er.title = "Radierer";
+  er.onclick = () => select(EMPTY);
+  wrap.appendChild(er);
+}
+function select(i) {
+  current = i;
+  const swatches = document.querySelectorAll(".swatch");
+  swatches.forEach((s) => s.classList.remove("sel"));
+  if (i === EMPTY) swatches[swatches.length - 1].classList.add("sel");
+  else swatches[i].classList.add("sel");
+}
+
+// ---- Live sync (polling) -----------------------------------------------------
+// The server is serverless (Vercel), so instead of SSE every client polls
+// /api/poll: grid + shared task/timer state + roster, about once per second.
+const POLL_MS = 1200;
+let clockOffset = 0;      // serverNow - localNow, so timers use server time
+let pollBusy = false;
+
+function serverNow() { return Date.now() + clockOffset; }
+
+function decodeCell(ch) { return ch === "." ? EMPTY : ch.charCodeAt(0) - 48; }
+
+function applyGrid(encoded) {
+  if (encoded.length !== W * H) return;
+  const now = Date.now();
+  for (const [k, p] of pending) if (now - p.ts > 2500) pending.delete(k);
+  for (let i = 0; i < encoded.length; i++) {
+    const pend = pending.get(i);
+    const want = pend ? pend.c : decodeCell(encoded[i]);
+    if (grid[i] !== want) { grid[i] = want; drawCell(i % W, Math.floor(i / W)); }
+  }
+}
+
+async function poll() {
+  if (pollBusy) return;
+  pollBusy = true;
+  try {
+    let q = "";
+    if (me) {
+      q = "?id=" + encodeURIComponent(clientId) +
+          "&name=" + encodeURIComponent(me.name) +
+          "&icon=" + encodeURIComponent(me.icon);
+    }
+    const data = await (await fetch("/api/poll" + q, { cache: "no-store" })).json();
+    clockOffset = data.now - Date.now();
+    applyState(data.state);
+    applyGrid(data.grid);
+    renderRoster(data.players || []);
+  } catch { /* transient network error — next poll will catch up */ }
+  pollBusy = false;
+}
+function pollNow() { poll(); }
+
+function renderRoster(list) {
+  // Dedupe identical name+icon (e.g. the same person on two tabs).
+  const seen = new Set();
+  const players = list.filter((p) => {
+    if (!p.name) return false;
+    const k = p.name + "|" + p.icon;
+    if (seen.has(k)) return false;
+    seen.add(k); return true;
+  });
+  document.getElementById("count").textContent = players.length + " online";
+  const el = document.getElementById("playerlist");
+  el.innerHTML = "";
+  players.forEach((p) => {
+    const row = document.createElement("div");
+    const mine = me && p.name === me.name && p.icon === me.icon;
+    row.className = "player" + (mine ? " you" : "");
+    const img = new Image(); img.src = p.icon; img.alt = p.name;
+    const nm = document.createElement("b"); nm.textContent = p.name;
+    row.appendChild(img); row.appendChild(nm);
+    el.appendChild(row);
+  });
+}
+
+// ---- Shared task + timer state ------------------------------------------------
+// The host chooses the reference image and controls the countdown; every client
+// mirrors that shared state here.
+let curTask = null, deadline = null, pausedSecs = null, duration = TASK_SECONDS;
+let verdict = null, firedRound = null;
+
+function applyState(s) {
+  if (!s) return;
+  if (s.w !== W || s.h !== H) {
+    W = s.w; H = s.h;
+    grid = new Array(W * H).fill(EMPTY);
+    pending.clear();
+    layout();
+  }
+  deadline = s.deadline; pausedSecs = s.paused; duration = s.duration;
+  verdict = s.verdict || null;
+  if (s.task !== curTask) {
+    curTask = s.task;
+    if (curTask) {
+      document.getElementById("refimg").src = "/tasks/image" + curTask + ".webp";
+      document.getElementById("reference").classList.remove("hide");
+      document.body.classList.add("task-open");
+      document.getElementById("timeup").classList.remove("show");
+    } else {
+      document.getElementById("reference").classList.add("hide");
+      document.body.classList.remove("task-open");
+    }
+    document.querySelectorAll(".taskbtn").forEach((b) => b.classList.toggle("active", b.dataset.task === curTask));
+    layout();
+  }
+  // Verdict arrived for the round currently shown in the modal?
+  if (verdict && verdict.round === firedRound &&
+      document.getElementById("timeup").classList.contains("show")) {
+    renderVerdict(verdict);
+  }
+}
+
+function timerTick() {
+  let secs, running = deadline !== null;
+  if (running) secs = Math.max(0, Math.ceil((deadline - serverNow()) / 1000));
+  else secs = pausedSecs !== null ? pausedSecs : duration;
+  const el = document.getElementById("timer");
+  el.textContent = fmt(secs);
+  el.classList.toggle("warn", running && secs <= 10);
+  document.getElementById("timerStart").textContent = (running && secs > 0) ? "⏸ Pause" : "▶ Start";
+  if (running && secs === 0 && curTask && firedRound !== deadline) {
+    firedRound = deadline;
+    showTimeUp();
+  }
+}
+setInterval(timerTick, 250);
+
+function fmt(s) { const m = Math.floor(s / 60), ss = s % 60; return (m < 10 ? "0" : "") + m + ":" + (ss < 10 ? "0" : "") + ss; }
+
+// ---- Host controls (admin token required) --------------------------------------
+function adminPost(path, body) {
+  return fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-admin-token": ADMIN_TOKEN },
+    body: JSON.stringify(body || {}),
+  }).then((r) => {
+    if (r.status === 403) alert("Admin-Token ungültig.");
+    pollNow(); // reflect the change immediately instead of waiting for the next poll
+    return r;
+  }).catch(() => {});
+}
+
+function openTask(n) { adminPost("/api/task", { task: String(n), seconds: TASK_SECONDS }); }
+function closeTask() { adminPost("/api/task", { task: null }); }
+function toggleTimer() { adminPost("/api/timer", { action: deadline !== null ? "pause" : "start" }); }
+function resetTimer() { adminPost("/api/timer", { action: "reset" }); }
+function clearCanvas() {
+  if (!confirm("Canvas wirklich für alle leeren?")) return;
+  adminPost("/api/clear");
+}
+
+// ---- Time-up modal + AI rating ---------------------------------------------------
+// Everyone sees the modal when the shared countdown hits zero. Only the host's
+// client asks the AI judge (once); the verdict is broadcast via the shared state.
+function showTimeUp() {
+  const modal = document.getElementById("timeup");
+  const ratingEl = document.getElementById("rating");
+  const fbEl = document.getElementById("evalFeedback");
+  modal.classList.add("show");
+  ratingEl.className = "rating";
+  ratingEl.textContent = "";
+  fbEl.textContent = "";
+  if (!curTask) return;   // no reference open → nothing to grade against
+
+  if (verdict && verdict.round === firedRound) { renderVerdict(verdict); return; }
+  ratingEl.classList.add("loading");
+  ratingEl.textContent = "Bewertung läuft …";
+
+  if (isAdmin) {
+    const image = canvas.toDataURL("image/png");
+    adminPost("/api/evaluate", { image })
+      .then((r) => (r && r.ok ? r.json() : null))
+      .then((v) => { if (v) renderVerdict(v); })
+      .catch(() => renderVerdict({ rating: null, feedback: "Bewertung fehlgeschlagen." }));
+  }
+  // Non-admin clients: the verdict arrives with one of the next polls.
+}
+
+function renderVerdict(v) {
+  const ratingEl = document.getElementById("rating");
+  const fbEl = document.getElementById("evalFeedback");
+  ratingEl.classList.remove("loading");
+  ratingEl.textContent = (v.rating === null || v.rating === undefined) ? "–/10" : v.rating + "/10";
+  fbEl.textContent = v.feedback || "";
+}
+
+// ---- Join lobby ------------------------------------------------------------
+function buildLobby() {
+  const grid = document.getElementById("icongrid");
+  grid.innerHTML = "";
+  ICONS.forEach((ic) => {
+    const card = document.createElement("div");
+    card.className = "icon";
+    const img = new Image(); img.src = ic.src; img.alt = ic.id;
+    card.appendChild(img);
+    card.onclick = () => {
+      pickedIcon = ic.src;
+      document.querySelectorAll(".icon").forEach((c) => c.classList.remove("sel"));
+      card.classList.add("sel");
+      refreshJoinBtn();
+    };
+    grid.appendChild(card);
+  });
+  const nameInput = document.getElementById("nameInput");
+  nameInput.addEventListener("input", refreshJoinBtn);
+  document.getElementById("joinBtn").onclick = doJoin;
+}
+function refreshJoinBtn() {
+  const name = document.getElementById("nameInput").value.trim();
+  document.getElementById("joinBtn").disabled = !(pickedIcon && name.length > 0);
+}
+function doJoin() {
+  const name = document.getElementById("nameInput").value.trim();
+  if (!pickedIcon || !name) return;
+  me = { name, icon: pickedIcon };
+  try { localStorage.setItem("pc_player", JSON.stringify(me)); } catch {}
+  enterCanvas();
+}
+function enterCanvas() {
+  document.getElementById("lobby").classList.add("hide");
+  // show own identity
+  const meEl = document.getElementById("me");
+  meEl.innerHTML = "";
+  const img = new Image(); img.src = me.icon;
+  const nm = document.createElement("span"); nm.textContent = me.name;
+  meEl.appendChild(img); meEl.appendChild(nm);
+  layout();
+  pollNow();
+}
+
+function setupControls() {
+  document.querySelectorAll(".taskbtn").forEach((b) => {
+    b.onclick = () => { if (b.classList.contains("active")) closeTask(); else openTask(b.dataset.task); };
+  });
+  document.getElementById("timerStart").onclick = toggleTimer;
+  document.getElementById("timerReset").onclick = resetTimer;
+  document.getElementById("canvasReset").onclick = clearCanvas;
+  document.getElementById("refClose").onclick = closeTask;
+  document.getElementById("timeupClose").onclick = () => document.getElementById("timeup").classList.remove("show");
+}
+
+// ---- QR overlay ------------------------------------------------------------
+function setupQR() {
+  const qr = document.getElementById("qr");
+  const img = new Image();
+  img.onload = () => { qr.innerHTML = ""; qr.appendChild(img); };
+  img.onerror = () => { qr.textContent = "QR offline – URL eintippen"; qr.style.color = "#333"; };
+  img.width = 200; img.height = 200; img.alt = "QR";
+  img.src = "https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=" + encodeURIComponent(location.origin);
+  document.getElementById("showJoin").onclick = () => document.getElementById("overlay").classList.add("show");
+  document.getElementById("hideJoin").onclick = () => document.getElementById("overlay").classList.remove("show");
+}
+
+// ---- Boot ------------------------------------------------------------------
+async function boot() {
+  const s = await (await fetch("/api/boot", { headers: { "x-admin-token": ADMIN_TOKEN } })).json();
+  PALETTE = s.palette; EMPTY = s.empty; ICONS = s.icons || [];
+  isAdmin = Boolean(s.admin);
+  document.body.classList.toggle("admin", isAdmin);
+  if (urlAdmin !== null && !isAdmin) alert("Admin-Token ungültig — Zuschauer-Modus.");
+  clockOffset = s.now - Date.now();
+  W = s.state.w; H = s.state.h;
+  grid = new Array(W * H).fill(EMPTY);
+  buildPalette();
+  buildLobby();
+  setupControls();
+  setupQR();
+  applyState(s.state);
+  applyGrid(s.grid);
+  // If the countdown already ran out before we loaded, don't pop the modal.
+  if (deadline !== null && deadline <= serverNow()) firedRound = deadline;
+  // Auto-rejoin if this device already chose a player.
+  try {
+    const saved = JSON.parse(localStorage.getItem("pc_player"));
+    if (saved && saved.name && saved.icon) { me = saved; enterCanvas(); }
+  } catch {}
+  redrawAll();
+  setInterval(poll, POLL_MS);
+}
+window.addEventListener("resize", () => { if (me) layout(); });
+boot();
+</script>
+</body>
+</html>

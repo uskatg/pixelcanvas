@@ -1,0 +1,12 @@
+{
+  "name": "pixelcanvas",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Kollaboratives Pixel-Canvas — retromania seminar",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
