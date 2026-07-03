@@ -1,7 +1,7 @@
 // POST /api/task {task: "1"|"2"|null, seconds?} — choose (or close) the shared
 // reference image. Admin only. Choosing a task reshapes the canvas to the
 // image's proportion, clears it, and starts the shared countdown for everyone.
-const { TASK_DIMS, DEFAULT_SECONDS, getWorld, pipeline, emptyGrid, saveState, isAdmin, sendJson, readJson } = require("../lib/core");
+const { TASK_DIMS, DEFAULT_SECONDS, getWorld, setWorld, emptyGrid, saveState, isAdmin, sendJson, readJson } = require("../lib/core");
 
 module.exports = async (req, res) => {
   if (req.method !== "POST") { sendJson(res, 405, {}); return; }
@@ -25,7 +25,8 @@ module.exports = async (req, res) => {
     state.deadline = Date.now() + secs * 1000; // countdown begins immediately
     state.paused = null;
     state.verdict = null;
-    await pipeline([["SET", "pc:grid", emptyGrid(dims.w, dims.h)], ["SET", "pc:state", JSON.stringify(state)]]);
+    state.ts = Date.now();
+    await setWorld(emptyGrid(dims.w, dims.h), state);
   } else {
     sendJson(res, 400, { error: "unknown task" });
     return;

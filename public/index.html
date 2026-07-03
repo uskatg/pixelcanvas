@@ -18,7 +18,10 @@
     margin: 0; height: 100%; background: var(--bg); color: var(--text);
     font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
     overflow: hidden; touch-action: none;
+    /* no long-press text selection / callout while painting */
+    -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
   }
+  #nameInput { -webkit-user-select: text; user-select: text; }
   body { display: flex; flex-direction: column; }
   img { image-rendering: pixelated; }
 
@@ -44,7 +47,7 @@
 
   /* ---- Canvas + player panel ---- */
   #stage { flex: 1; display: flex; min-height: 0; }
-  #canvaswrap { flex: 1; display: flex; align-items: center; justify-content: center; padding: 10px; min-width: 0; }
+  #canvaswrap { flex: 1; display: flex; align-items: center; justify-content: center; padding: 10px; min-width: 0; overflow: hidden; position: relative; }
   #players { width: clamp(96px, 28vw, 188px); flex: none; background: transparent; overflow-y: auto; padding: 12px 10px; }
   #players h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; opacity: .6; margin: 0 0 12px; }
   #playerlist { display: flex; flex-direction: column; gap: 10px; }
@@ -75,9 +78,25 @@
   .ctrlbtn.alt { background: transparent; color: var(--text); border: 1px solid var(--line); }
   #refClose { margin-top: auto; }
 
+  /* ---- Mobile: the canvas is the whole stage ---- */
+  /* No player list; the reference becomes a slim strip above the canvas
+     instead of a side column, so the canvas gets the full width. */
   @media (max-width: 760px) {
-    body.task-open #players { display: none; }
-    #reference { width: clamp(112px, 36vw, 230px); }
+    #players { display: none; }
+    #stage { flex-direction: column; }
+    #reference {
+      width: 100%; flex-direction: row; align-items: center; gap: 10px;
+      border-right: none; border-bottom: 1px solid var(--line);
+      padding: 8px 10px; overflow-x: auto; overflow-y: hidden;
+    }
+    #reference h3 { display: none; }
+    #refimg-wrap { width: 76px; flex: none; }
+    #timerbox { gap: 4px; }
+    #timer { font-size: 26px; }
+    #timer-controls { flex-wrap: nowrap; }
+    .ctrlbtn { white-space: nowrap; }
+    #refClose { margin-top: 0; margin-left: auto; }
+    #canvaswrap { padding: 6px; }
   }
 
   /* ---- Palette ---- */
@@ -288,9 +307,14 @@ function drawGrid() {
 }
 
 // ---- Painting --------------------------------------------------------------
-// Optimistic: draw + POST immediately; the poll loop won't overwrite a cell we
-// painted in the last 2.5s, so our own strokes never flicker.
-const pending = new Map(); // cellIndex -> { c, ts }
+// Optimistic drawing with batched uploads: strokes render locally right away,
+// queue up, and are flushed as ONE request every 200ms (a fast drag used to be
+// dozens of parallel requests, which lagged and made pixels flicker).
+// A painted cell is protected from being overwritten by poll data until the
+// server has confirmed the batch AND a poll that started after that
+// confirmation has come back.
+const pending = new Map();   // cellIndex -> { c, ts, ack }
+const sendQueue = new Map(); // cellIndex -> c
 let painting = false, lastKey = "";
 function cellFromEvent(e) {
   const r = canvas.getBoundingClientRect();
@@ -303,25 +327,108 @@ function paintAt(x, y) {
   const key = x + "," + y;
   if (key === lastKey) return;
   lastKey = key;
-  if (grid[y * W + x] === current) return;
-  grid[y * W + x] = current;
-  pending.set(y * W + x, { c: current, ts: Date.now() });
+  const idx = y * W + x;
+  if (grid[idx] === current) return;
+  grid[idx] = current;
+  pending.set(idx, { c: current, ts: Date.now(), ack: 0 });
+  sendQueue.set(idx, current);
   drawCell(x, y);
-  fetch("/api/paint", { method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ x, y, c: current }), keepalive: true }).catch(() => {});
 }
+async function flushPaints() {
+  if (!sendQueue.size) return;
+  const cells = [];
+  for (const [idx, c] of sendQueue) cells.push({ x: idx % W, y: Math.floor(idx / W), c });
+  sendQueue.clear();
+  try {
+    const r = await fetch("/api/paint", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cells }), keepalive: true,
+    });
+    if (r.ok) {
+      const t = Date.now();
+      for (const cell of cells) {
+        const p = pending.get(cell.y * W + cell.x);
+        if (p && p.c === cell.c) p.ack = t;
+      }
+    }
+  } catch { /* retry not needed: the cells stay pending and protected */ }
+}
+setInterval(flushPaints, 200);
+window.addEventListener("pagehide", () => {
+  if (!sendQueue.size) return;
+  const cells = [];
+  for (const [idx, c] of sendQueue) cells.push({ x: idx % W, y: Math.floor(idx / W), c });
+  sendQueue.clear();
+  navigator.sendBeacon("/api/paint", new Blob([JSON.stringify({ cells })], { type: "application/json" }));
+});
 canvas.addEventListener("pointerdown", (e) => {
-  e.preventDefault(); painting = true; lastKey = "";
+  e.preventDefault();
+  if (touches.size >= 2 || pinch) return; // second finger = zoom, not paint
+  painting = true; lastKey = "";
   canvas.setPointerCapture(e.pointerId);
   const c = cellFromEvent(e); if (c) paintAt(c.x, c.y);
 });
 canvas.addEventListener("pointermove", (e) => {
-  if (!painting) return; e.preventDefault();
+  if (!painting || pinch) return; e.preventDefault();
   const c = cellFromEvent(e); if (c) paintAt(c.x, c.y);
 });
 function stop() { painting = false; lastKey = ""; }
 canvas.addEventListener("pointerup", stop);
 canvas.addEventListener("pointercancel", stop);
+
+// ---- Pinch zoom (mobile) ------------------------------------------------------
+// Two fingers on the canvas area zoom/pan the canvas itself (the page stays
+// fixed). One finger always paints, also while zoomed in.
+const wrapEl = document.getElementById("canvaswrap");
+const frameEl = document.getElementById("frame");
+const touches = new Map(); // pointerId -> {x, y}
+let zoom = 1, panX = 0, panY = 0, pinch = null;
+function applyTransform() {
+  frameEl.style.transform = zoom === 1 ? "" : "translate(" + panX + "px," + panY + "px) scale(" + zoom + ")";
+}
+function resetZoom() { zoom = 1; panX = 0; panY = 0; pinch = null; applyTransform(); }
+function clampPan() {
+  const mx = frameEl.offsetWidth * zoom / 2, my = frameEl.offsetHeight * zoom / 2;
+  panX = Math.max(-mx, Math.min(mx, panX));
+  panY = Math.max(-my, Math.min(my, panY));
+}
+wrapEl.addEventListener("pointerdown", (e) => {
+  if (e.pointerType !== "touch") return;
+  touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (touches.size === 2) {
+    painting = false; lastKey = "";
+    const [a, b] = [...touches.values()];
+    pinch = {
+      d0: Math.hypot(a.x - b.x, a.y - b.y) || 1,
+      mid0: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 },
+      z0: zoom, panX0: panX, panY0: panY,
+    };
+  }
+}, true);
+wrapEl.addEventListener("pointermove", (e) => {
+  if (!touches.has(e.pointerId)) return;
+  touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (!pinch || touches.size < 2) return;
+  const [a, b] = [...touches.values()];
+  const d = Math.hypot(a.x - b.x, a.y - b.y) || 1;
+  const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+  const r = wrapEl.getBoundingClientRect();
+  const c = { x: r.left + r.width / 2, y: r.top + r.height / 2 }; // frame is flex-centered in the wrap
+  const z = Math.min(8, Math.max(1, pinch.z0 * (d / pinch.d0)));
+  // keep the pinch midpoint anchored; moving both fingers together pans
+  panX = (mid.x - c.x) - ((pinch.mid0.x - c.x) - pinch.panX0) * (z / pinch.z0);
+  panY = (mid.y - c.y) - ((pinch.mid0.y - c.y) - pinch.panY0) * (z / pinch.z0);
+  zoom = z;
+  if (zoom === 1) { panX = 0; panY = 0; }
+  clampPan();
+  applyTransform();
+}, true);
+function endTouch(e) {
+  touches.delete(e.pointerId);
+  if (touches.size < 2) pinch = null;
+}
+wrapEl.addEventListener("pointerup", endTouch, true);
+wrapEl.addEventListener("pointercancel", endTouch, true);
 
 // ---- Palette UI ------------------------------------------------------------
 function buildPalette() {
@@ -353,16 +460,21 @@ function select(i) {
 // /api/poll: grid + shared task/timer state + roster, about once per second.
 const POLL_MS = 1200;
 let clockOffset = 0;      // serverNow - localNow, so timers use server time
-let pollBusy = false;
+let pollBusy = false, pollAgain = false;
 
 function serverNow() { return Date.now() + clockOffset; }
 
 function decodeCell(ch) { return ch === "." ? EMPTY : ch.charCodeAt(0) - 48; }
 
-function applyGrid(encoded) {
+// A locally painted cell wins over poll data until the server confirmed its
+// batch and this poll started after that confirmation (otherwise a response
+// that was generated before our stroke landed would erase it for a moment).
+function applyGrid(encoded, pollStart) {
   if (encoded.length !== W * H) return;
   const now = Date.now();
-  for (const [k, p] of pending) if (now - p.ts > 2500) pending.delete(k);
+  for (const [k, p] of pending) {
+    if ((p.ack && pollStart > p.ack) || now - p.ts > 10000) pending.delete(k);
+  }
   for (let i = 0; i < encoded.length; i++) {
     const pend = pending.get(i);
     const want = pend ? pend.c : decodeCell(encoded[i]);
@@ -371,8 +483,9 @@ function applyGrid(encoded) {
 }
 
 async function poll() {
-  if (pollBusy) return;
+  if (pollBusy) { pollAgain = true; return; }
   pollBusy = true;
+  const started = Date.now();
   try {
     let q = "";
     if (me) {
@@ -383,10 +496,11 @@ async function poll() {
     const data = await (await fetch("/api/poll" + q, { cache: "no-store" })).json();
     clockOffset = data.now - Date.now();
     applyState(data.state);
-    applyGrid(data.grid);
+    applyGrid(data.grid, started);
     renderRoster(data.players || []);
   } catch { /* transient network error — next poll will catch up */ }
   pollBusy = false;
+  if (pollAgain) { pollAgain = false; poll(); }
 }
 function pollNow() { poll(); }
 
@@ -417,14 +531,21 @@ function renderRoster(list) {
 // The host chooses the reference image and controls the countdown; every client
 // mirrors that shared state here.
 let curTask = null, deadline = null, pausedSecs = null, duration = TASK_SECONDS;
-let verdict = null, firedRound = null;
+let verdict = null, firedRound = null, lastStateTs = 0;
 
 function applyState(s) {
   if (!s) return;
+  // Ignore state older than what we already applied (e.g. a poll response that
+  // was generated just before the host switched tasks) — this used to make the
+  // reference image blink away on the host's screen.
+  if ((s.ts || 0) < lastStateTs) return;
+  lastStateTs = s.ts || 0;
   if (s.w !== W || s.h !== H) {
     W = s.w; H = s.h;
     grid = new Array(W * H).fill(EMPTY);
     pending.clear();
+    sendQueue.clear();
+    resetZoom();
     layout();
   }
   deadline = s.deadline; pausedSecs = s.paused; duration = s.duration;
@@ -475,7 +596,9 @@ function adminPost(path, body) {
     body: JSON.stringify(body || {}),
   }).then((r) => {
     if (r.status === 403) alert("Admin-Token ungültig.");
-    pollNow(); // reflect the change immediately instead of waiting for the next poll
+    // apply the new shared state right away (clone: callers may read the body too)
+    if (r.ok) r.clone().json().then((d) => { if (d && d.state) applyState(d.state); }).catch(() => {});
+    pollNow(); // and fetch the grid, which may have been reset
     return r;
   }).catch(() => {});
 }
