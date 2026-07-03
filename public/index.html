@@ -676,7 +676,9 @@ function doJoin() {
   const name = document.getElementById("nameInput").value.trim();
   if (!pickedIcon || !name) return;
   me = { name, icon: pickedIcon };
-  try { localStorage.setItem("pc_player", JSON.stringify(me)); } catch {}
+  // sessionStorage: survives a reload mid-round, but a freshly opened browser
+  // (e.g. scanning the QR again) goes through the join screen again.
+  try { sessionStorage.setItem("pc_player", JSON.stringify(me)); } catch {}
   enterCanvas();
 }
 function enterCanvas() {
@@ -732,9 +734,10 @@ async function boot() {
   applyGrid(s.grid);
   // If the countdown already ran out before we loaded, don't pop the modal.
   if (deadline !== null && deadline <= serverNow()) firedRound = deadline;
-  // Auto-rejoin if this device already chose a player.
+  // Auto-rejoin after a reload within the same browser session only.
   try {
-    const saved = JSON.parse(localStorage.getItem("pc_player"));
+    localStorage.removeItem("pc_player"); // clear identities saved by older versions
+    const saved = JSON.parse(sessionStorage.getItem("pc_player"));
     if (saved && saved.name && saved.icon) { me = saved; enterCanvas(); }
   } catch {}
   redrawAll();
