@@ -10,13 +10,16 @@ module.exports = async (req, res) => {
   const now = Date.now();
 
   if (action === "start") {
-    const remaining = state.paused !== null ? state.paused : state.duration;
+    // paused === 0 (or an already-expired deadline) means the round is over:
+    // starting again begins a fresh round of full length, not a 1-second stub.
+    const remaining = state.paused ? state.paused : state.duration;
     state.deadline = now + Math.max(1, remaining) * 1000;
     state.paused = null;
     state.verdict = null;
   } else if (action === "pause") {
     if (state.deadline !== null) {
-      state.paused = Math.max(0, Math.ceil((state.deadline - now) / 1000));
+      const left = Math.ceil((state.deadline - now) / 1000);
+      state.paused = left > 0 ? left : state.duration;
       state.deadline = null;
     }
   } else if (action === "reset") {

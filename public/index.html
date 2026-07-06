@@ -37,6 +37,8 @@
   header h1 img { height: 24px; width: auto; }
   #me { display: flex; align-items: center; gap: 6px; font-size: 12px; }
   #me img { width: 24px; height: 24px; border-radius: 5px; background:#fff; }
+  #offline { display: none; font-size: 11px; color: #e8402a; white-space: nowrap; }
+  body.offline #offline { display: inline; }
   #roster { margin-left: auto; display: flex; align-items: center; gap: 8px; }
   .count { font-size: 12px; opacity: .8; white-space: nowrap; }
   .joinbtn {
@@ -56,9 +58,29 @@
   .player b { font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .player.you b { color: var(--accent); }
   .player.you b::after { content: " (du)"; opacity: .5; font-size: 11px; }
+  .player.mutable { cursor: pointer; border-radius: 6px; }
+  .player.mutable:hover { background: rgba(255,255,255,.05); }
+  .player.muted b { text-decoration: line-through; opacity: .5; }
+  .player.muted::after { content: "🔇"; margin-left: auto; font-size: 13px; }
   #frame { position: relative; line-height: 0; border: 1px solid var(--line); box-shadow: 0 0 0 4px #000, 0 10px 40px rgba(0,0,0,.6); }
   #canvas { background: var(--empty); image-rendering: pixelated; display: block; touch-action: none; }
   #grid { position: absolute; top: 0; left: 0; pointer-events: none; }
+
+  /* ---- Beamer / projector mode (?beamer=1): big canvas, persistent QR, no
+         palette or join lobby — the presenter's shared screen ---- */
+  #beamerpanel { display: none; }
+  body.beamer #players { display: block; width: clamp(180px, 24vw, 320px); }
+  body.beamer #players h3, body.beamer #playerlist { display: none; }
+  body.beamer #beamerpanel { display: flex; flex-direction: column; align-items: center; gap: 16px; padding-top: 8px; }
+  body.beamer .palette { display: none; }
+  body.beamer #me, body.beamer #showJoin { display: none; }
+  #beamerqr { background: #fff; padding: 12px; border-radius: 12px; line-height: 0; min-width: 120px; min-height: 120px; display: flex; align-items: center; justify-content: center; }
+  #beamerqr img { display: block; width: 100%; max-width: 240px; height: auto; }
+  #beamerjoin { font-size: 14px; opacity: .85; text-align: center; line-height: 1.4; }
+  #beamercount { font-size: 22px; font-weight: 700; color: var(--accent); font-variant-numeric: tabular-nums; }
+  /* In beamer mode the timer should dominate the reference column. */
+  body.beamer #timer { font-size: clamp(44px, 8vw, 72px); }
+  body.beamer #reference { width: clamp(160px, 24vw, 340px); }
 
   /* ---- Reference task panel (left) + timer ---- */
   #reference {
@@ -73,6 +95,8 @@
   #timerbox { display: flex; flex-direction: column; align-items: center; gap: 8px; }
   #timer { font-size: clamp(30px, 7vw, 46px); font-weight: 700; letter-spacing: 2px; font-variant-numeric: tabular-nums; }
   #timer.warn { color: #e8402a; }
+  #similarity { display: none; font-size: 13px; opacity: .85; color: var(--accent); font-variant-numeric: tabular-nums; }
+  body.beamer #similarity { font-size: 20px; }
   #timer-controls { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
   .ctrlbtn { font: inherit; font-size: 13px; background: var(--accent); color: #fff; border: none; border-radius: 8px; padding: 8px 12px; cursor: pointer; }
   .ctrlbtn.alt { background: transparent; color: var(--text); border: 1px solid var(--line); }
@@ -142,6 +166,12 @@
   }
   #joinBtn:disabled { opacity: .35; cursor: not-allowed; }
 
+  /* ---- Reference lightbox (tap the small reference to see it big) ---- */
+  #reference #refimg { cursor: zoom-in; }
+  #refbox { position: fixed; inset: 0; background: rgba(0,0,0,.92); display: none; align-items: center; justify-content: center; z-index: 35; padding: 20px; cursor: zoom-out; }
+  #refbox.show { display: flex; }
+  #refbox img { max-width: 100%; max-height: 100%; image-rendering: auto; border-radius: 8px; box-shadow: 0 10px 50px rgba(0,0,0,.7); }
+
   /* ---- QR overlay ---- */
   #overlay { position: fixed; inset: 0; background: rgba(0,0,0,.85); display: none; flex-direction: column; align-items: center; justify-content: center; gap: 18px; z-index: 30; padding: 24px; text-align: center; }
   #overlay.show { display: flex; }
@@ -153,9 +183,17 @@
   #timeup.show { display: flex; }
   #timeup .big { font-size: clamp(30px, 9vw, 64px); font-weight: 700; letter-spacing: 2px; color: #e8402a; text-transform: uppercase; }
   #timeup .sub2 { font-size: 15px; opacity: .75; }
+  #timeup .replay { display: none; image-rendering: pixelated; background: #fff; border-radius: 8px; box-shadow: 0 0 0 3px #000, 0 10px 40px rgba(0,0,0,.6); max-width: min(80vw, 320px); height: auto; }
+  #timeup .replay.show { display: block; }
   #timeup .rating { font-size: clamp(34px, 10vw, 64px); font-weight: 700; color: var(--accent); font-variant-numeric: tabular-nums; min-height: 1.1em; }
   #timeup .rating.loading { font-size: 16px; font-weight: 400; color: var(--text); opacity: .8; letter-spacing: 1px; }
   #timeup .evalfb { font-size: 16px; max-width: 440px; line-height: 1.45; opacity: .9; }
+  #timeup .statslist { display: flex; flex-direction: column; gap: 7px; width: 100%; max-width: 340px; margin-top: 4px; }
+  #timeup .statsrow { display: flex; align-items: center; gap: 10px; font-size: 15px; }
+  #timeup .statsrow .rank { width: 24px; text-align: center; flex: none; }
+  #timeup .statsrow img { width: 26px; height: 26px; border-radius: 6px; background: #fff; flex: none; }
+  #timeup .statsrow b { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #timeup .statsrow .n { margin-left: auto; font-variant-numeric: tabular-nums; opacity: .75; flex: none; }
   #timeup .joinbtn { font-size: 15px; padding: 10px 20px; }
 </style>
 </head>
@@ -173,6 +211,7 @@
   <header>
     <h1><img src="/logo.webp" alt="" />Pixel-Canvas</h1>
     <span id="me"></span>
+    <span id="offline">⚠ offline</span>
     <div id="roster">
       <button class="joinbtn taskbtn adminonly" data-task="1">Bild 1</button>
       <button class="joinbtn taskbtn adminonly" data-task="2">Bild 2</button>
@@ -187,6 +226,7 @@
       <div id="refimg-wrap"><img id="refimg" alt="Vorlage" /></div>
       <div id="timerbox">
         <div id="timer">03:00</div>
+        <div id="similarity"></div>
         <div id="timer-controls" class="adminonly">
           <button class="ctrlbtn" id="timerStart">▶ Start</button>
           <button class="ctrlbtn alt" id="timerReset">↺ Reset</button>
@@ -204,6 +244,11 @@
     <aside id="players">
       <h3>Spieler·innen</h3>
       <div id="playerlist"></div>
+      <div id="beamerpanel">
+        <div id="beamerqr">…</div>
+        <div id="beamerjoin">Scanne den QR-Code<br>zum Mitmalen</div>
+        <div id="beamercount">– online</div>
+      </div>
     </aside>
   </div>
 
@@ -214,11 +259,15 @@
     <button class="joinbtn" id="hideJoin">Schließen</button>
   </div>
 
+  <div id="refbox"><img id="refbox-img" alt="Vorlage" /></div>
+
   <div id="timeup">
     <div class="big">⏰ Zeit ist um!</div>
     <div class="sub2">Die Zeit ist vorbei.</div>
+    <canvas id="replay" class="replay"></canvas>
     <div id="rating" class="rating"></div>
     <div id="evalFeedback" class="evalfb"></div>
+    <div id="statsList" class="statslist"></div>
     <button class="joinbtn" id="timeupClose">Schließen</button>
   </div>
 
@@ -243,9 +292,15 @@ if (urlAdmin !== null) {
 }
 const ADMIN_TOKEN = localStorage.getItem("pc_admin") || "";
 let isAdmin = false;
+const mutedIds = new Set(); // host's view of who is muted (admin only)
 
 // Countdown length the host uses when opening a task; override with ?t=<seconds>.
 const TASK_SECONDS = Math.max(5, parseInt(bootParams.get("t"), 10) || 180);
+
+// Beamer / projector mode: display-only shared screen (no join, no painting,
+// persistent QR). Combine with ?admin=<token> so the presenter's screen also
+// controls the round: /?admin=<token>&beamer=1
+const isBeamer = bootParams.get("beamer") === "1";
 
 // Stable per-device id for the presence roster.
 let clientId = localStorage.getItem("pc_id");
@@ -318,6 +373,10 @@ function drawGrid() {
 const pending = new Map();   // cellIndex -> { c, ts, ack }
 const sendQueue = new Map(); // cellIndex -> c
 let painting = false, lastKey = "";
+// Cells painted in the current stroke (idx + previous color), so an accidental
+// dot from the first finger of a pinch-zoom can be undone when the 2nd lands.
+let strokeStart = 0;
+const strokeCells = [];
 function cellFromEvent(e) {
   const r = canvas.getBoundingClientRect();
   const x = Math.floor((e.clientX - r.left) / r.width * W);
@@ -326,34 +385,75 @@ function cellFromEvent(e) {
   return { x, y };
 }
 function paintAt(x, y) {
+  // Round over → canvas frozen (matches the server-side guard in api/paint.js)
+  // until the host starts a new round or closes the task.
+  if (curTask && deadline !== null && serverNow() >= deadline) return;
   const key = x + "," + y;
   if (key === lastKey) return;
   lastKey = key;
   const idx = y * W + x;
   if (grid[idx] === current) return;
+  strokeCells.push({ idx, prev: grid[idx] });
   grid[idx] = current;
   pending.set(idx, { c: current, ts: Date.now(), ack: 0 });
   sendQueue.set(idx, current);
   drawCell(x, y);
+}
+// Undo the current stroke (used when a pinch-zoom starts): restore each cell's
+// previous color and queue that value so an already-flushed dot is corrected.
+function revertStroke() {
+  const now = Date.now();
+  for (let i = strokeCells.length - 1; i >= 0; i--) {
+    const { idx, prev } = strokeCells[i];
+    grid[idx] = prev;
+    pending.set(idx, { c: prev, ts: now, ack: 0 });
+    sendQueue.set(idx, prev);
+    drawCell(idx % W, Math.floor(idx / W));
+  }
+  strokeCells.length = 0;
+}
+// Consecutive network failures (poll or paint flush) show an offline badge.
+let netFails = 0;
+function netStatus(ok) {
+  netFails = ok ? 0 : netFails + 1;
+  document.body.classList.toggle("offline", netFails >= 2);
 }
 async function flushPaints() {
   if (!sendQueue.size) return;
   const cells = [];
   for (const [idx, c] of sendQueue) cells.push({ x: idx % W, y: Math.floor(idx / W), c });
   sendQueue.clear();
+  const sentW = W, sentH = H;
+  let ok = false;
   try {
     const r = await fetch("/api/paint", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ cells }), keepalive: true,
+      body: JSON.stringify({ cells, id: clientId }), keepalive: true,
     });
-    if (r.ok) {
+    ok = r.ok;
+    if (ok) {
       const t = Date.now();
       for (const cell of cells) {
         const p = pending.get(cell.y * W + cell.x);
         if (p && p.c === cell.c) p.ack = t;
       }
     }
-  } catch { /* retry not needed: the cells stay pending and protected */ }
+  } catch { /* handled below */ }
+  netStatus(ok);
+  if (!ok && W === sentW && H === sentH) {
+    // Failed flush (flaky Wi-Fi): re-queue the batch so the stroke isn't lost —
+    // unless the cell was repainted meanwhile (newer color wins) or the grid
+    // was reshaped by a task switch (old indexes would be garbage).
+    const t = Date.now();
+    for (const cell of cells) {
+      const idx = cell.y * W + cell.x;
+      if (!sendQueue.has(idx)) {
+        sendQueue.set(idx, cell.c);
+        const p = pending.get(idx);
+        if (p && p.c === cell.c) p.ts = t; // keep the local render protected
+      }
+    }
+  }
 }
 setInterval(flushPaints, 200);
 window.addEventListener("pagehide", () => {
@@ -361,12 +461,15 @@ window.addEventListener("pagehide", () => {
   const cells = [];
   for (const [idx, c] of sendQueue) cells.push({ x: idx % W, y: Math.floor(idx / W), c });
   sendQueue.clear();
-  navigator.sendBeacon("/api/paint", new Blob([JSON.stringify({ cells })], { type: "application/json" }));
+  navigator.sendBeacon("/api/paint", new Blob([JSON.stringify({ cells, id: clientId })], { type: "application/json" }));
 });
 canvas.addEventListener("pointerdown", (e) => {
+  if (isBeamer) return; // projector view is display-only
   e.preventDefault();
   if (touches.size >= 2 || pinch) return; // second finger = zoom, not paint
   painting = true; lastKey = "";
+  strokeStart = Date.now();
+  strokeCells.length = 0;
   canvas.setPointerCapture(e.pointerId);
   const c = cellFromEvent(e); if (c) paintAt(c.x, c.y);
 });
@@ -399,6 +502,9 @@ wrapEl.addEventListener("pointerdown", (e) => {
   touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
   if (touches.size === 2) {
     painting = false; lastKey = "";
+    // Undo an accidental dot the first finger just placed before the pinch —
+    // only if the stroke just began and is tiny (a real drag is left alone).
+    if (Date.now() - strokeStart < 350 && strokeCells.length && strokeCells.length <= 3) revertStroke();
     const [a, b] = [...touches.values()];
     pinch = {
       d0: Math.hypot(a.x - b.x, a.y - b.y) || 1,
@@ -484,7 +590,105 @@ function applyGrid(encoded, pollStart) {
   }
 }
 
+// ---- Timelapse recording + replay -------------------------------------------
+// Every client records the shared grid string each poll during a round, then
+// plays it back on the time-up modal. Pure client-side; ~150 frames/round.
+let frames = [], recordRound = null, replayTimer = null;
+function recordFrame(encoded) {
+  if (!curTask || deadline === null) return;
+  if (deadline !== recordRound) { recordRound = deadline; frames = []; } // new round
+  if (serverNow() < deadline + 1500 && frames.length < 400 && encoded.length === W * H) {
+    frames.push(encoded);
+  }
+}
+function drawReplayFrame(rctx, enc, scale) {
+  rctx.fillStyle = "#ffffff";
+  rctx.fillRect(0, 0, rctx.canvas.width, rctx.canvas.height);
+  for (let idx = 0; idx < enc.length; idx++) {
+    const c = decodeCell(enc[idx]);
+    if (c === EMPTY) continue;
+    rctx.fillStyle = PALETTE[c];
+    rctx.fillRect((idx % W) * scale, Math.floor(idx / W) * scale, scale, scale);
+  }
+}
+function playTimelapse() {
+  const rc = document.getElementById("replay");
+  clearInterval(replayTimer); replayTimer = null;
+  if (frames.length < 2 || frames[0].length !== W * H) { rc.classList.remove("show"); return; }
+  const scale = Math.max(2, Math.floor(300 / Math.max(W, H)));
+  rc.width = W * scale; rc.height = H * scale;
+  rc.classList.add("show");
+  const rctx = rc.getContext("2d");
+  const total = frames.length;
+  const step = Math.max(1, Math.round(total / 45)); // ~45 draws over the run
+  let i = 0;
+  replayTimer = setInterval(() => {
+    if (i >= total) {
+      drawReplayFrame(rctx, frames[total - 1], scale); // land on the final frame
+      clearInterval(replayTimer); replayTimer = null;
+      return;
+    }
+    drawReplayFrame(rctx, frames[i], scale);
+    i += step;
+  }, 90);
+}
+
+// ---- Live similarity meter (admin / beamer view only) ------------------------
+// Downsample the reference to the grid, snap each cell to the nearest palette
+// colour, and show how much of the shared canvas already agrees with it. Pure
+// client-side; the AI judge at the end is the authoritative score.
+let targetGrid = null; // Int8Array of nearest-palette indices, or null
+function hexToRgb(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+function computeTarget() {
+  targetGrid = null;
+  if (!curTask) return;
+  const img = document.getElementById("refimg");
+  if (!img.complete || !img.naturalWidth) return; // wait for the load event
+  try {
+    const off = document.createElement("canvas");
+    off.width = W; off.height = H;
+    const octx = off.getContext("2d");
+    octx.drawImage(img, 0, 0, W, H);
+    const data = octx.getImageData(0, 0, W, H).data;
+    const pal = PALETTE.map(hexToRgb);
+    const t = new Int8Array(W * H);
+    for (let i = 0; i < W * H; i++) {
+      const r = data[i * 4], g = data[i * 4 + 1], b = data[i * 4 + 2];
+      let best = 0, bestD = Infinity;
+      for (let k = 0; k < pal.length; k++) {
+        const dr = r - pal[k][0], dg = g - pal[k][1], db = b - pal[k][2];
+        const d = dr * dr + dg * dg + db * db;
+        if (d < bestD) { bestD = d; best = k; }
+      }
+      t[i] = best;
+    }
+    targetGrid = t;
+  } catch { targetGrid = null; } // getImageData can fail if the image isn't ready
+}
+function updateSimilarity() {
+  const el = document.getElementById("similarity");
+  if (!el) return;
+  if (!(isAdmin || isBeamer) || !curTask || !targetGrid || targetGrid.length !== grid.length) {
+    el.style.display = "none";
+    return;
+  }
+  const white = PALETTE.indexOf("#ffffff"); // an empty cell reads as white
+  let match = 0;
+  for (let i = 0; i < targetGrid.length; i++) {
+    const pj = grid[i] === EMPTY ? white : grid[i];
+    if (pj === targetGrid[i]) match++;
+  }
+  el.style.display = "block"; // explicit — "" would fall back to the CSS default (none)
+  el.textContent = "Übereinstimmung: " + Math.round(match / targetGrid.length * 100) + "%";
+}
+
 async function poll() {
+  // Hidden tab: skip polling entirely — a forgotten open tab would otherwise
+  // keep burning ~4 Redis commands every 1.2s against the Upstash quota.
+  if (document.hidden) return;
   if (pollBusy) { pollAgain = true; return; }
   pollBusy = true;
   const started = Date.now();
@@ -499,8 +703,11 @@ async function poll() {
     clockOffset = data.now - Date.now();
     applyState(data.state);
     applyGrid(data.grid, started);
+    recordFrame(data.grid);
     renderRoster(data.players || []);
-  } catch { /* transient network error — next poll will catch up */ }
+    updateSimilarity();
+    netStatus(true);
+  } catch { netStatus(false); /* transient network error — next poll will catch up */ }
   pollBusy = false;
   if (pollAgain) { pollAgain = false; poll(); }
 }
@@ -516,17 +723,30 @@ function renderRoster(list) {
     seen.add(k); return true;
   });
   document.getElementById("count").textContent = players.length + " online";
+  document.getElementById("beamercount").textContent = players.length + " online";
   const el = document.getElementById("playerlist");
   el.innerHTML = "";
   players.forEach((p) => {
     const row = document.createElement("div");
     const mine = me && p.name === me.name && p.icon === me.icon;
-    row.className = "player" + (mine ? " you" : "");
+    const muted = p.id && mutedIds.has(p.id);
+    row.className = "player" + (mine ? " you" : "") + (isAdmin && p.id ? " mutable" : "") + (muted ? " muted" : "");
     const img = new Image(); img.src = p.icon; img.alt = p.name;
     const nm = document.createElement("b"); nm.textContent = p.name;
     row.appendChild(img); row.appendChild(nm);
+    // Host taps a player to mute/unmute them (desktop admin view only).
+    if (isAdmin && p.id && !mine) {
+      row.title = "Klicken zum Stummschalten";
+      row.onclick = () => toggleMute(p.id);
+    }
     el.appendChild(row);
   });
+}
+
+function toggleMute(id) {
+  const willMute = !mutedIds.has(id);
+  if (willMute) mutedIds.add(id); else mutedIds.delete(id);
+  adminPost("/api/mute", { id, muted: willMute }); // adminPost re-polls → roster restyles
 }
 
 // ---- Shared task + timer state ------------------------------------------------
@@ -565,6 +785,10 @@ function applyState(s) {
     }
     document.querySelectorAll(".taskbtn").forEach((b) => b.classList.toggle("active", b.dataset.task === curTask));
     layout();
+    // Reset the similarity target on any task change; the refimg 'load' handler
+    // recomputes it once the new reference finishes loading.
+    computeTarget();
+    updateSimilarity();
   }
   // Verdict arrived for the round currently shown in the modal?
   if (verdict && verdict.round === firedRound &&
@@ -607,7 +831,12 @@ function adminPost(path, body) {
 
 function openTask(n) { adminPost("/api/task", { task: String(n), seconds: TASK_SECONDS }); }
 function closeTask() { adminPost("/api/task", { task: null }); }
-function toggleTimer() { adminPost("/api/timer", { action: deadline !== null ? "pause" : "start" }); }
+function toggleTimer() {
+  // "Running" means the deadline is in the future — an expired round's stale
+  // deadline must lead to "start" (fresh full round), not a no-op "pause".
+  const running = deadline !== null && serverNow() < deadline;
+  adminPost("/api/timer", { action: running ? "pause" : "start" });
+}
 function resetTimer() { adminPost("/api/timer", { action: "reset" }); }
 function clearCanvas() {
   if (!confirm("Canvas wirklich für alle leeren?")) return;
@@ -625,7 +854,14 @@ function showTimeUp() {
   ratingEl.className = "rating";
   ratingEl.textContent = "";
   fbEl.textContent = "";
+  document.getElementById("statsList").innerHTML = "";
   if (!curTask) return;   // no reference open → nothing to grade against
+
+  playTimelapse(); // replay how the canvas came together this round
+
+  // Per-player leaderboard for the round that just ended (fetched once).
+  fetch("/api/stats?round=" + encodeURIComponent(firedRound))
+    .then((r) => r.json()).then(renderStats).catch(() => {});
 
   if (verdict && verdict.round === firedRound) { renderVerdict(verdict); return; }
   ratingEl.classList.add("loading");
@@ -647,6 +883,25 @@ function renderVerdict(v) {
   ratingEl.classList.remove("loading");
   ratingEl.textContent = (v.rating === null || v.rating === undefined) ? "–/10" : v.rating + "/10";
   fbEl.textContent = v.feedback || "";
+}
+
+// Leaderboard of who painted the most pixels this round (top painters).
+function renderStats(data) {
+  const el = document.getElementById("statsList");
+  el.innerHTML = "";
+  const list = (data && data.players) || [];
+  const medals = ["🥇", "🥈", "🥉"];
+  list.forEach((p, i) => {
+    const row = document.createElement("div");
+    row.className = "statsrow";
+    const rank = document.createElement("span");
+    rank.className = "rank"; rank.textContent = medals[i] || (i + 1) + ".";
+    const img = new Image(); img.src = p.icon || ""; img.alt = "";
+    const nm = document.createElement("b"); nm.textContent = p.name;
+    const n = document.createElement("span"); n.className = "n"; n.textContent = p.count + " px";
+    row.appendChild(rank); row.appendChild(img); row.appendChild(nm); row.appendChild(n);
+    el.appendChild(row);
+  });
 }
 
 // ---- Join lobby ------------------------------------------------------------
@@ -703,26 +958,60 @@ function setupControls() {
   document.getElementById("timerReset").onclick = resetTimer;
   document.getElementById("canvasReset").onclick = clearCanvas;
   document.getElementById("refClose").onclick = closeTask;
-  document.getElementById("timeupClose").onclick = () => document.getElementById("timeup").classList.remove("show");
+  document.getElementById("timeupClose").onclick = () => {
+    document.getElementById("timeup").classList.remove("show");
+    clearInterval(replayTimer); replayTimer = null;
+  };
+  // Recompute the similarity target whenever a new reference image finishes loading.
+  document.getElementById("refimg").addEventListener("load", () => { computeTarget(); updateSimilarity(); });
+  // Tap the reference to enlarge it (mobile shows only a 76px thumbnail).
+  const refbox = document.getElementById("refbox");
+  document.getElementById("refimg").addEventListener("click", () => {
+    const src = document.getElementById("refimg").src;
+    if (!src) return;
+    document.getElementById("refbox-img").src = src;
+    refbox.classList.add("show");
+  });
+  refbox.addEventListener("click", () => refbox.classList.remove("show"));
 }
 
 // ---- QR overlay ------------------------------------------------------------
-function setupQR() {
-  const qr = document.getElementById("qr");
+// The QR encodes the join URL (origin only — never the admin token or ?beamer).
+function buildQR(el, size) {
   const img = new Image();
-  img.onload = () => { qr.innerHTML = ""; qr.appendChild(img); };
-  img.onerror = () => { qr.textContent = "QR offline – URL eintippen"; qr.style.color = "#333"; };
-  img.width = 200; img.height = 200; img.alt = "QR";
-  img.src = "https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=" + encodeURIComponent(location.origin);
+  img.onload = () => { el.innerHTML = ""; el.appendChild(img); };
+  img.onerror = () => { el.textContent = "QR offline – URL eintippen"; el.style.color = "#333"; };
+  img.width = size; img.height = size; img.alt = "QR";
+  img.src = "https://api.qrserver.com/v1/create-qr-code/?size=" + size + "x" + size +
+            "&data=" + encodeURIComponent(location.origin);
+}
+function setupQR() {
+  buildQR(document.getElementById("qr"), 200);
   document.getElementById("showJoin").onclick = () => document.getElementById("overlay").classList.add("show");
   document.getElementById("hideJoin").onclick = () => document.getElementById("overlay").classList.remove("show");
 }
 
 // ---- Boot ------------------------------------------------------------------
 async function boot() {
-  const s = await (await fetch("/api/boot", { headers: { "x-admin-token": ADMIN_TOKEN } })).json();
+  // Retry until the first load succeeds — one dropped request on crowded
+  // seminar Wi-Fi must not leave a permanently blank page.
+  let s = null;
+  const sub = document.querySelector("#lobby .sub");
+  const subText = sub.textContent;
+  for (let attempt = 1; !s; attempt++) {
+    try {
+      const r = await fetch("/api/boot", { headers: { "x-admin-token": ADMIN_TOKEN } });
+      if (!r.ok) throw new Error("boot " + r.status);
+      s = await r.json();
+    } catch {
+      sub.textContent = "Verbindung fehlgeschlagen — neuer Versuch …";
+      await new Promise((done) => setTimeout(done, Math.min(5000, 1000 * attempt)));
+    }
+  }
+  sub.textContent = subText;
   PALETTE = s.palette; EMPTY = s.empty; ICONS = s.icons || [];
   isAdmin = Boolean(s.admin);
+  (s.muted || []).forEach((id) => mutedIds.add(id));
   document.body.classList.toggle("admin", isAdmin);
   if (urlAdmin !== null && !isAdmin) alert("Admin-Token ungültig — Zuschauer-Modus.");
   clockOffset = s.now - Date.now();
@@ -736,16 +1025,27 @@ async function boot() {
   applyGrid(s.grid);
   // If the countdown already ran out before we loaded, don't pop the modal.
   if (deadline !== null && deadline <= serverNow()) firedRound = deadline;
-  // Auto-rejoin after a reload within the same browser session only.
-  try {
-    localStorage.removeItem("pc_player"); // clear identities saved by older versions
-    const saved = JSON.parse(sessionStorage.getItem("pc_player"));
-    if (saved && saved.name && saved.icon) { me = saved; enterCanvas(); }
-  } catch {}
+  if (isBeamer) {
+    // Projector view: no lobby, no identity — just display and show the QR.
+    document.body.classList.add("beamer");
+    document.getElementById("lobby").classList.add("hide");
+    buildQR(document.getElementById("beamerqr"), 240);
+    layout();
+    pollNow();
+  } else {
+    // Auto-rejoin after a reload within the same browser session only.
+    try {
+      localStorage.removeItem("pc_player"); // clear identities saved by older versions
+      const saved = JSON.parse(sessionStorage.getItem("pc_player"));
+      if (saved && saved.name && saved.icon) { me = saved; enterCanvas(); }
+    } catch {}
+  }
   redrawAll();
   setInterval(poll, POLL_MS);
 }
-window.addEventListener("resize", () => { if (me) layout(); });
+window.addEventListener("resize", () => { if (me || isBeamer) layout(); });
+// Coming back to a hidden tab: resync right away instead of waiting for the interval.
+document.addEventListener("visibilitychange", () => { if (!document.hidden) poll(); });
 boot();
 </script>
 </body>

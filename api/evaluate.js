@@ -92,8 +92,20 @@ module.exports = async (req, res) => {
     return;
   }
 
+  const round = state.deadline;
   const result = await evaluateCanvas(refB64, image);
-  state.verdict = { ...result, round: state.deadline };
-  await saveState(state);
-  sendJson(res, 200, state.verdict);
+  // The API call above takes seconds — the host may have started a new round or
+  // switched tasks meanwhile. Re-read fresh state and attach the verdict to THAT,
+  // and only if the round is unchanged; never write the stale pre-call snapshot back.
+  const { state: fresh } = await getWorld();
+  if (fresh.verdict && fresh.verdict.round === round) {
+    sendJson(res, 200, fresh.verdict);
+    return;
+  }
+  const verdict = { ...result, round };
+  if (fresh.deadline === round && fresh.task === state.task) {
+    fresh.verdict = verdict;
+    await saveState(fresh);
+  }
+  sendJson(res, 200, verdict);
 };

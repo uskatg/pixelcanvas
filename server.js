@@ -21,6 +21,8 @@ const API = {
   task: require("./api/task"),
   timer: require("./api/timer"),
   evaluate: require("./api/evaluate"),
+  stats: require("./api/stats"),
+  mute: require("./api/mute"),
 };
 
 const server = http.createServer((req, res) => {
