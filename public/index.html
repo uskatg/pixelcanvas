@@ -39,6 +39,7 @@
   #me img { width: 24px; height: 24px; border-radius: 5px; background:#fff; }
   #offline { display: none; font-size: 11px; color: #e8402a; white-space: nowrap; }
   body.offline #offline { display: inline; }
+  #langToggle { font-size: 11px; padding: 3px 8px; letter-spacing: 1px; }
   #roster { margin-left: auto; display: flex; align-items: center; gap: 8px; }
   .count { font-size: 12px; opacity: .8; white-space: nowrap; }
   .joinbtn {
@@ -57,7 +58,7 @@
   .player img { width: 30px; height: 30px; border-radius: 7px; background: #fff; flex: none; }
   .player b { font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .player.you b { color: var(--accent); }
-  .player.you b::after { content: " (du)"; opacity: .5; font-size: 11px; }
+  .player.you b::after { content: var(--you-suffix, " (du)"); opacity: .5; font-size: 11px; }
   .player.mutable { cursor: pointer; border-radius: 6px; }
   .player.mutable:hover { background: rgba(255,255,255,.05); }
   .player.muted b { text-decoration: line-through; opacity: .5; }
@@ -210,12 +211,13 @@
   <!-- Canvas app -->
   <header>
     <h1><img src="/logo.webp" alt="" />Pixel-Canvas</h1>
+    <button class="joinbtn" id="langToggle">DE</button>
     <span id="me"></span>
     <span id="offline">⚠ offline</span>
     <div id="roster">
       <button class="joinbtn taskbtn adminonly" data-task="1">Bild 1</button>
       <button class="joinbtn taskbtn adminonly" data-task="2">Bild 2</button>
-      <button class="joinbtn adminonly" id="clearHeader">🗑 Leeren</button>
+      <button class="joinbtn adminonly" id="clearHeader">Leeren</button>
       <span class="count" id="count">– online</span>
       <button class="joinbtn" id="showJoin">QR</button>
     </div>
@@ -279,6 +281,70 @@ let current = 0;          // selected palette index (EMPTY = eraser)
 let cellPx = 10;          // canvas pixels per cell
 let me = null;            // { name, icon }  current player
 let pickedIcon = null;    // selected icon src in the lobby
+
+// ---- i18n (DE default) -------------------------------------------------------
+// The DE/EN toggle next to the logo switches the whole UI; the choice persists.
+const I18N = {
+  de: {
+    lobbySub: "Wähle deinen Charakter & gib deinen Namen ein",
+    namePlaceholder: "Dein Name", joinBtn: "Beitreten",
+    task1: "Bild 1", task2: "Bild 2", clear: "Leeren", canvasClear: "Canvas leeren",
+    qr: "QR", vorlage: "Vorlage", start: "Start", pause: "Pause", reset: "Reset", close: "Schließen",
+    players: "Spieler·innen", beamerJoin: "Scanne den QR-Code<br>zum Mitmalen",
+    timeUpBig: "⏰ Zeit ist um!", timeUpSub: "Die Zeit ist vorbei.",
+    online: "online", match: "Übereinstimmung", offline: "⚠ offline",
+    evalRunning: "Bewertung läuft …", connFail: "Verbindung fehlgeschlagen — neuer Versuch …",
+    confirmClear: "Canvas wirklich für alle leeren?", muteTitle: "Klicken zum Stummschalten",
+    adminInvalid: "Admin-Token ungültig.", adminSpectator: "Admin-Token ungültig — Zuschauer-Modus.",
+    youSuffix: '" (du)"',
+  },
+  en: {
+    lobbySub: "Choose your character & enter your name",
+    namePlaceholder: "Your name", joinBtn: "Join",
+    task1: "Image 1", task2: "Image 2", clear: "Clear", canvasClear: "Clear canvas",
+    qr: "QR", vorlage: "Reference", start: "Start", pause: "Pause", reset: "Reset", close: "Close",
+    players: "Players", beamerJoin: "Scan the QR code<br>to join in",
+    timeUpBig: "⏰ Time's up!", timeUpSub: "The time is over.",
+    online: "online", match: "Match", offline: "⚠ offline",
+    evalRunning: "Evaluating …", connFail: "Connection failed — retrying …",
+    confirmClear: "Really clear the canvas for everyone?", muteTitle: "Click to mute",
+    adminInvalid: "Invalid admin token.", adminSpectator: "Invalid admin token — spectator mode.",
+    youSuffix: '" (you)"',
+  },
+};
+let lang = localStorage.getItem("pc_lang") === "en" ? "en" : "de";
+function t(key) { return I18N[lang][key]; }
+function applyLang() {
+  const T = I18N[lang];
+  document.documentElement.lang = lang;
+  document.documentElement.style.setProperty("--you-suffix", T.youSuffix);
+  document.getElementById("langToggle").textContent = lang.toUpperCase();
+  const set = (sel, txt) => { const e = document.querySelector(sel); if (e) e.textContent = txt; };
+  set("#lobby .sub", T.lobbySub);
+  const nm = document.getElementById("nameInput"); if (nm) nm.placeholder = T.namePlaceholder;
+  set("#joinBtn", T.joinBtn);
+  document.querySelectorAll(".taskbtn").forEach((b) => { b.textContent = T["task" + b.dataset.task]; });
+  set("#clearHeader", T.clear);
+  set("#canvasReset", "🗑 " + T.canvasClear);
+  set("#showJoin", T.qr);
+  set("#reference h3", T.vorlage);
+  set("#timerReset", "↺ " + T.reset);
+  set("#refClose", "✕ " + T.close);
+  set("#players h3", T.players);
+  const bj = document.getElementById("beamerjoin"); if (bj) bj.innerHTML = T.beamerJoin;
+  set("#timeup .big", T.timeUpBig);
+  set("#timeup .sub2", T.timeUpSub);
+  set("#timeupClose", T.close);
+  set("#hideJoin", T.close);
+  set("#offline", T.offline);
+  if (typeof timerTick === "function") timerTick();       // refresh Start/Pause label
+  if (typeof updateSimilarity === "function") updateSimilarity();
+}
+function toggleLang() {
+  lang = lang === "de" ? "en" : "de";
+  try { localStorage.setItem("pc_lang", lang); } catch {}
+  applyLang();
+}
 
 // ---- Admin token -------------------------------------------------------------
 // The presenter opens /?admin=<token>. The token is stashed in localStorage and
@@ -683,7 +749,7 @@ function updateSimilarity() {
     if (pj === targetGrid[i]) match++;
   }
   el.style.display = "block"; // explicit — "" would fall back to the CSS default (none)
-  el.textContent = "Übereinstimmung: " + Math.round(match / targetGrid.length * 100) + "%";
+  el.textContent = t("match") + ": " + Math.round(match / targetGrid.length * 100) + "%";
 }
 
 async function poll() {
@@ -737,7 +803,7 @@ function renderRoster(list) {
     row.appendChild(img); row.appendChild(nm);
     // Host taps a player to mute/unmute them (desktop admin view only).
     if (isAdmin && p.id && !mine) {
-      row.title = "Klicken zum Stummschalten";
+      row.title = t("muteTitle");
       row.onclick = () => toggleMute(p.id);
     }
     el.appendChild(row);
@@ -805,7 +871,7 @@ function timerTick() {
   const el = document.getElementById("timer");
   el.textContent = fmt(secs);
   el.classList.toggle("warn", running && secs <= 10);
-  document.getElementById("timerStart").textContent = (running && secs > 0) ? "⏸ Pause" : "▶ Start";
+  document.getElementById("timerStart").textContent = (running && secs > 0) ? "⏸ " + t("pause") : "▶ " + t("start");
   if (running && secs === 0 && curTask && firedRound !== deadline) {
     firedRound = deadline;
     showTimeUp();
@@ -822,7 +888,7 @@ function adminPost(path, body) {
     headers: { "Content-Type": "application/json", "x-admin-token": ADMIN_TOKEN },
     body: JSON.stringify(body || {}),
   }).then((r) => {
-    if (r.status === 403) alert("Admin-Token ungültig.");
+    if (r.status === 403) alert(t("adminInvalid"));
     // apply the new shared state right away (clone: callers may read the body too)
     if (r.ok) r.clone().json().then((d) => { if (d && d.state) applyState(d.state); }).catch(() => {});
     pollNow(); // and fetch the grid, which may have been reset
@@ -840,7 +906,7 @@ function toggleTimer() {
 }
 function resetTimer() { adminPost("/api/timer", { action: "reset" }); }
 function clearCanvas() {
-  if (!confirm("Canvas wirklich für alle leeren?")) return;
+  if (!confirm(t("confirmClear"))) return;
   adminPost("/api/clear");
 }
 
@@ -866,14 +932,14 @@ function showTimeUp() {
 
   if (verdict && verdict.round === firedRound) { renderVerdict(verdict); return; }
   ratingEl.classList.add("loading");
-  ratingEl.textContent = "Bewertung läuft …";
+  ratingEl.textContent = t("evalRunning");
 
   if (isAdmin) {
     const image = canvas.toDataURL("image/png");
-    adminPost("/api/evaluate", { image })
+    adminPost("/api/evaluate", { image, lang }) // AI rates in the host's language
       .then((r) => (r && r.ok ? r.json() : null))
       .then((v) => { if (v) renderVerdict(v); })
-      .catch(() => renderVerdict({ rating: null, feedback: "Bewertung fehlgeschlagen." }));
+      .catch(() => renderVerdict({ rating: null, feedback: "" }));
   }
   // Non-admin clients: the verdict arrives with one of the next polls.
 }
@@ -959,6 +1025,7 @@ function setupControls() {
   document.getElementById("timerReset").onclick = resetTimer;
   document.getElementById("canvasReset").onclick = clearCanvas;
   document.getElementById("clearHeader").onclick = clearCanvas;
+  document.getElementById("langToggle").onclick = toggleLang;
   document.getElementById("refClose").onclick = closeTask;
   document.getElementById("timeupClose").onclick = () => {
     document.getElementById("timeup").classList.remove("show");
@@ -995,27 +1062,27 @@ function setupQR() {
 
 // ---- Boot ------------------------------------------------------------------
 async function boot() {
+  applyLang(); // reflect the persisted language before anything is shown
   // Retry until the first load succeeds — one dropped request on crowded
   // seminar Wi-Fi must not leave a permanently blank page.
   let s = null;
   const sub = document.querySelector("#lobby .sub");
-  const subText = sub.textContent;
   for (let attempt = 1; !s; attempt++) {
     try {
       const r = await fetch("/api/boot", { headers: { "x-admin-token": ADMIN_TOKEN } });
       if (!r.ok) throw new Error("boot " + r.status);
       s = await r.json();
     } catch {
-      sub.textContent = "Verbindung fehlgeschlagen — neuer Versuch …";
+      sub.textContent = t("connFail");
       await new Promise((done) => setTimeout(done, Math.min(5000, 1000 * attempt)));
     }
   }
-  sub.textContent = subText;
+  sub.textContent = t("lobbySub");
   PALETTE = s.palette; EMPTY = s.empty; ICONS = s.icons || [];
   isAdmin = Boolean(s.admin);
   (s.muted || []).forEach((id) => mutedIds.add(id));
   document.body.classList.toggle("admin", isAdmin);
-  if (urlAdmin !== null && !isAdmin) alert("Admin-Token ungültig — Zuschauer-Modus.");
+  if (urlAdmin !== null && !isAdmin) alert(t("adminSpectator"));
   clockOffset = s.now - Date.now();
   W = s.state.w; H = s.state.h;
   grid = new Array(W * H).fill(EMPTY);
