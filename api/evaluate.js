@@ -2,7 +2,7 @@
 // active task's reference image. Admin only (the presenter's client triggers it
 // once when the countdown ends); the verdict is stored in the shared state so
 // every polling client sees the same rating.
-const { ANTHROPIC_API_KEY, EVAL_MODEL, getWorld, saveState, isAdmin, sendJson, readJson } = require("../lib/core");
+const { ANTHROPIC_API_KEY, EVAL_MODEL, getWorld, saveState, pipeline, isAdmin, sendJson, readJson } = require("../lib/core");
 
 // The host's UI language (sent with the request) decides the rating language.
 const EVAL = {
@@ -35,7 +35,7 @@ const EVAL = {
 };
 function evalStrings(lang) { return EVAL[lang === "en" ? "en" : "de"]; }
 
-async function evaluateCanvas(refB64, dataUrl, L) {
+async function evaluateCanvas(refB64, refMedia, dataUrl, L) {
   if (!ANTHROPIC_API_KEY) return { rating: null, feedback: L.noKey };
   const m = /^data:(image\/png|image\/jpeg|image\/webp);base64,(.+)$/s.exec(dataUrl || "");
   if (!m) return { rating: null, feedback: L.badImage };
@@ -57,7 +57,7 @@ async function evaluateCanvas(refB64, dataUrl, L) {
       role: "user",
       content: [
         { type: "text", text: L.intro },
-        { type: "image", source: { type: "base64", media_type: "image/webp", data: refB64 } },
+        { type: "image", source: { type: "base64", media_type: refMedia, data: refB64 } },
         { type: "image", source: { type: "base64", media_type: m[1], data: m[2] } },
         { type: "text", text: L.ask },
       ],
@@ -107,20 +107,34 @@ module.exports = async (req, res) => {
     return;
   }
 
-  // The reference image lives in /public (served statically) — serverless
-  // functions can't read it from disk, so fetch it from our own deployment.
-  const proto = req.headers["x-forwarded-proto"] || "http";
-  const refUrl = proto + "://" + req.headers.host + "/tasks/image" + state.task + ".webp";
-  let refB64;
-  try {
-    refB64 = Buffer.from(await (await fetch(refUrl)).arrayBuffer()).toString("base64");
-  } catch {
-    sendJson(res, 200, { rating: null, feedback: L.noRef });
-    return;
+  // Reference image: a custom round stores it in Redis (pc:customref); the
+  // built-in tasks live in /public, which serverless functions can't read from
+  // disk, so fetch those from our own deployment.
+  let refB64, refMedia = "image/webp";
+  if (state.task === "custom") {
+    try {
+      const [dataUrl] = await pipeline([["GET", "pc:customref"]]);
+      const rm = /^data:(image\/(?:png|jpeg|webp));base64,(.+)$/s.exec(dataUrl || "");
+      if (!rm) throw new Error("no custom ref");
+      refMedia = rm[1];
+      refB64 = rm[2];
+    } catch {
+      sendJson(res, 200, { rating: null, feedback: L.noRef });
+      return;
+    }
+  } else {
+    const proto = req.headers["x-forwarded-proto"] || "http";
+    const refUrl = proto + "://" + req.headers.host + "/tasks/image" + state.task + ".webp";
+    try {
+      refB64 = Buffer.from(await (await fetch(refUrl)).arrayBuffer()).toString("base64");
+    } catch {
+      sendJson(res, 200, { rating: null, feedback: L.noRef });
+      return;
+    }
   }
 
   const round = state.deadline;
-  const result = await evaluateCanvas(refB64, image, L);
+  const result = await evaluateCanvas(refB64, refMedia, image, L);
   // The API call above takes seconds — the host may have started a new round or
   // switched tasks meanwhile. Re-read fresh state and attach the verdict to THAT,
   // and only if the round is unchanged; never write the stale pre-call snapshot back.

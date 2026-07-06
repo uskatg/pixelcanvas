@@ -46,7 +46,22 @@
     font: inherit; font-size: 12px; background: transparent; color: var(--text);
     border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; cursor: pointer;
   }
-  .taskbtn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .taskbtn.active, #uploadBtn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+  /* ---- Upload modal (custom reference image) ---- */
+  #uploadModal { position: fixed; inset: 0; background: rgba(0,0,0,.85); display: none; align-items: center; justify-content: center; z-index: 45; padding: 20px; }
+  #uploadModal.show { display: flex; }
+  .upload-card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 20px; width: 100%; max-width: 380px; display: flex; flex-direction: column; gap: 14px; max-height: 90vh; overflow-y: auto; }
+  .upload-card h3 { margin: 0; font-size: 14px; color: var(--accent); text-transform: uppercase; letter-spacing: 1px; }
+  #uploadPick { text-align: center; font: inherit; font-size: 14px; background: var(--accent); color: #fff; border-radius: 8px; padding: 10px; cursor: pointer; }
+  #uploadPreview { min-height: 130px; background: #000; border: 1px solid var(--line); border-radius: 8px; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+  #uploadPreview img { max-width: 100%; max-height: 240px; image-rendering: auto; }
+  #uploadHint { opacity: .5; font-size: 13px; }
+  .upload-timer { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+  .upload-timer input { width: 60px; font: inherit; font-size: 15px; text-align: center; background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 6px; }
+  .upload-actions { display: flex; gap: 10px; }
+  .upload-actions .ctrlbtn { flex: 1; }
+  .upload-actions .ctrlbtn:disabled { opacity: .4; cursor: not-allowed; }
 
   /* ---- Canvas + player panel ---- */
   #stage { flex: 1; display: flex; min-height: 0; }
@@ -217,6 +232,7 @@
     <div id="roster">
       <button class="joinbtn taskbtn adminonly" data-task="1">Bild 1</button>
       <button class="joinbtn taskbtn adminonly" data-task="2">Bild 2</button>
+      <button class="joinbtn adminonly" id="uploadBtn">Upload</button>
       <button class="joinbtn adminonly" id="clearHeader">Leeren</button>
       <span class="count" id="count">– online</span>
       <button class="joinbtn" id="showJoin">QR</button>
@@ -274,6 +290,26 @@
     <button class="joinbtn" id="timeupClose">Schließen</button>
   </div>
 
+  <!-- Upload own reference image + set timer, then start a custom round -->
+  <div id="uploadModal">
+    <div class="upload-card">
+      <h3 id="uploadTitle">Eigenes Bild hochladen</h3>
+      <label id="uploadPick" for="uploadFile">Bild wählen</label>
+      <input id="uploadFile" type="file" accept="image/*" hidden />
+      <div id="uploadPreview"><span id="uploadHint">Noch kein Bild gewählt</span></div>
+      <div class="upload-timer">
+        <span id="uploadTimeLabel">Zeit:</span>
+        <input id="uploadMin" type="number" min="0" max="60" value="3" inputmode="numeric" />
+        <span>:</span>
+        <input id="uploadSec" type="number" min="0" max="59" value="0" inputmode="numeric" />
+      </div>
+      <div class="upload-actions">
+        <button class="ctrlbtn" id="uploadStart" disabled>Start</button>
+        <button class="ctrlbtn alt" id="uploadCancel">Abbrechen</button>
+      </div>
+    </div>
+  </div>
+
 <script>
 let W = 64, H = 64, PALETTE = [], EMPTY = -1, ICONS = [];
 let grid = [];
@@ -296,6 +332,8 @@ const I18N = {
     evalRunning: "Bewertung läuft …", connFail: "Verbindung fehlgeschlagen — neuer Versuch …",
     confirmClear: "Canvas wirklich für alle leeren?", muteTitle: "Klicken zum Stummschalten",
     adminInvalid: "Admin-Token ungültig.", adminSpectator: "Admin-Token ungültig — Zuschauer-Modus.",
+    upload: "Upload", uploadTitle: "Eigenes Bild hochladen", uploadPick: "Bild wählen",
+    uploadHint: "Noch kein Bild gewählt", uploadTime: "Zeit:", cancel: "Abbrechen",
     youSuffix: '" (du)"',
   },
   en: {
@@ -309,6 +347,8 @@ const I18N = {
     evalRunning: "Evaluating …", connFail: "Connection failed — retrying …",
     confirmClear: "Really clear the canvas for everyone?", muteTitle: "Click to mute",
     adminInvalid: "Invalid admin token.", adminSpectator: "Invalid admin token — spectator mode.",
+    upload: "Upload", uploadTitle: "Upload your own image", uploadPick: "Choose image",
+    uploadHint: "No image selected yet", uploadTime: "Time:", cancel: "Cancel",
     youSuffix: '" (you)"',
   },
 };
@@ -337,6 +377,13 @@ function applyLang() {
   set("#timeupClose", T.close);
   set("#hideJoin", T.close);
   set("#offline", T.offline);
+  set("#uploadBtn", T.upload);
+  set("#uploadTitle", T.uploadTitle);
+  set("#uploadPick", T.uploadPick);
+  set("#uploadHint", T.uploadHint);
+  set("#uploadTimeLabel", T.uploadTime);
+  set("#uploadStart", T.start);
+  set("#uploadCancel", T.cancel);
   if (typeof timerTick === "function") timerTick();       // refresh Start/Pause label
   if (typeof updateSimilarity === "function") updateSimilarity();
 }
@@ -820,7 +867,7 @@ function toggleMute(id) {
 // The host chooses the reference image and controls the countdown; every client
 // mirrors that shared state here.
 let curTask = null, deadline = null, pausedSecs = null, duration = TASK_SECONDS;
-let verdict = null, firedRound = null, lastStateTs = 0;
+let verdict = null, firedRound = null, lastStateTs = 0, shownCustomVer = null;
 
 function applyState(s) {
   if (!s) return;
@@ -839,9 +886,18 @@ function applyState(s) {
   }
   deadline = s.deadline; pausedSecs = s.paused; duration = s.duration;
   verdict = s.verdict || null;
-  if (s.task !== curTask) {
+  // Update the reference on a task change OR when the custom image is replaced.
+  const taskChanged = s.task !== curTask;
+  const customChanged = s.task === "custom" && s.customVer !== shownCustomVer;
+  if (taskChanged || customChanged) {
     curTask = s.task;
-    if (curTask) {
+    if (curTask === "custom") {
+      shownCustomVer = s.customVer;
+      fetchCustomRef(); // sets refimg.src to the uploaded image (data URL)
+      document.getElementById("reference").classList.remove("hide");
+      document.body.classList.add("task-open");
+      document.getElementById("timeup").classList.remove("show");
+    } else if (curTask) {
       document.getElementById("refimg").src = "/tasks/image" + curTask + ".webp";
       document.getElementById("reference").classList.remove("hide");
       document.body.classList.add("task-open");
@@ -850,12 +906,15 @@ function applyState(s) {
       document.getElementById("reference").classList.add("hide");
       document.body.classList.remove("task-open");
     }
-    document.querySelectorAll(".taskbtn").forEach((b) => b.classList.toggle("active", b.dataset.task === curTask));
-    layout();
-    // Reset the similarity target on any task change; the refimg 'load' handler
-    // recomputes it once the new reference finishes loading.
-    computeTarget();
-    updateSimilarity();
+    if (taskChanged) {
+      document.querySelectorAll(".taskbtn").forEach((b) => b.classList.toggle("active", b.dataset.task === curTask));
+      document.getElementById("uploadBtn").classList.toggle("active", curTask === "custom");
+      layout();
+      // Reset the similarity target; the refimg 'load' handler recomputes it
+      // once the new reference finishes loading.
+      computeTarget();
+      updateSimilarity();
+    }
   }
   // Verdict arrived for the round currently shown in the modal?
   if (verdict && verdict.round === firedRound &&
@@ -908,6 +967,65 @@ function resetTimer() { adminPost("/api/timer", { action: "reset" }); }
 function clearCanvas() {
   if (!confirm(t("confirmClear"))) return;
   adminPost("/api/clear");
+}
+
+// ---- Custom reference upload (admin) ----------------------------------------
+// Host picks any image + a duration; the image is downscaled client-side, the
+// grid is sized to its proportion, and a custom round starts like Bild 1/2.
+let uploadImage = null, uploadDims = null;
+function customDims(iw, ih) {
+  const MAX = 48, MIN = 16; // longest side ~48 cells, matching the built-in tasks
+  let w, h;
+  if (iw >= ih) { w = MAX; h = Math.round(MAX * ih / iw); }
+  else { h = MAX; w = Math.round(MAX * iw / ih); }
+  return { w: Math.max(MIN, Math.min(64, w)), h: Math.max(MIN, Math.min(64, h)) };
+}
+function openUpload() {
+  uploadImage = null; uploadDims = null;
+  document.getElementById("uploadPreview").innerHTML = '<span id="uploadHint">' + t("uploadHint") + "</span>";
+  document.getElementById("uploadFile").value = "";
+  document.getElementById("uploadStart").disabled = true;
+  document.getElementById("uploadModal").classList.add("show");
+}
+function closeUpload() { document.getElementById("uploadModal").classList.remove("show"); }
+function handleUploadFile(file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    const img = new Image();
+    img.onload = () => {
+      const MAX = 480; // downscale before upload so the payload stays small
+      const scale = Math.min(1, MAX / Math.max(img.naturalWidth, img.naturalHeight));
+      const dw = Math.max(1, Math.round(img.naturalWidth * scale));
+      const dh = Math.max(1, Math.round(img.naturalHeight * scale));
+      const c = document.createElement("canvas");
+      c.width = dw; c.height = dh;
+      c.getContext("2d").drawImage(img, 0, 0, dw, dh);
+      uploadImage = c.toDataURL("image/webp", 0.85);
+      if (!uploadImage.startsWith("data:image/webp")) uploadImage = c.toDataURL("image/jpeg", 0.85);
+      uploadDims = customDims(img.naturalWidth, img.naturalHeight);
+      const pv = document.getElementById("uploadPreview");
+      pv.innerHTML = "";
+      const pimg = new Image(); pimg.src = uploadImage; pv.appendChild(pimg);
+      document.getElementById("uploadStart").disabled = false;
+    };
+    img.onerror = () => alert(lang === "de" ? "Bild konnte nicht geladen werden." : "Could not load image.");
+    img.src = reader.result;
+  };
+  reader.readAsDataURL(file);
+}
+function startUpload() {
+  if (!uploadImage || !uploadDims) return;
+  const min = parseInt(document.getElementById("uploadMin").value, 10) || 0;
+  const sec = parseInt(document.getElementById("uploadSec").value, 10) || 0;
+  const seconds = Math.min(3600, Math.max(5, min * 60 + sec));
+  closeUpload();
+  adminPost("/api/task", { task: "custom", image: uploadImage, w: uploadDims.w, h: uploadDims.h, seconds });
+}
+function fetchCustomRef() {
+  fetch("/api/customref").then((r) => r.json()).then((d) => {
+    if (d && d.image) document.getElementById("refimg").src = d.image;
+  }).catch(() => {});
 }
 
 // ---- Time-up modal + AI rating ---------------------------------------------------
@@ -1026,6 +1144,10 @@ function setupControls() {
   document.getElementById("canvasReset").onclick = clearCanvas;
   document.getElementById("clearHeader").onclick = clearCanvas;
   document.getElementById("langToggle").onclick = toggleLang;
+  document.getElementById("uploadBtn").onclick = openUpload;
+  document.getElementById("uploadCancel").onclick = closeUpload;
+  document.getElementById("uploadStart").onclick = startUpload;
+  document.getElementById("uploadFile").addEventListener("change", (e) => handleUploadFile(e.target.files && e.target.files[0]));
   document.getElementById("refClose").onclick = closeTask;
   document.getElementById("timeupClose").onclick = () => {
     document.getElementById("timeup").classList.remove("show");

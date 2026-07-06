@@ -23,6 +23,7 @@ const API = {
   evaluate: require("./api/evaluate"),
   stats: require("./api/stats"),
   mute: require("./api/mute"),
+  customref: require("./api/customref"),
 };
 
 const server = http.createServer((req, res) => {
