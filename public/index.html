@@ -215,6 +215,7 @@
     <div id="roster">
       <button class="joinbtn taskbtn adminonly" data-task="1">Bild 1</button>
       <button class="joinbtn taskbtn adminonly" data-task="2">Bild 2</button>
+      <button class="joinbtn adminonly" id="clearHeader">🗑 Leeren</button>
       <span class="count" id="count">– online</span>
       <button class="joinbtn" id="showJoin">QR</button>
     </div>
@@ -957,6 +958,7 @@ function setupControls() {
   document.getElementById("timerStart").onclick = toggleTimer;
   document.getElementById("timerReset").onclick = resetTimer;
   document.getElementById("canvasReset").onclick = clearCanvas;
+  document.getElementById("clearHeader").onclick = clearCanvas;
   document.getElementById("refClose").onclick = closeTask;
   document.getElementById("timeupClose").onclick = () => {
     document.getElementById("timeup").classList.remove("show");
