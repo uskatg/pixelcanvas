@@ -13,7 +13,7 @@ module.exports = async (req, res) => {
     const [muted] = await pipeline([["SISMEMBER", "pc:muted", id]]);
     if (Number(muted) === 1) { res.writeHead(204); res.end(); return; }
   }
-  const { state } = await getWorld();
+  const { state, grid } = await getWorld();
   // Round over → the canvas is frozen so the AI rating matches what everyone
   // painted. 1.5s grace covers a flush that was in flight when the clock hit 0.
   if (state.task && state.deadline !== null && Date.now() > state.deadline + 1500) {
@@ -40,6 +40,10 @@ module.exports = async (req, res) => {
     ? { key: "pc:stats:" + state.deadline, id, n: valid.length }
     : null;
   await paintCells(valid, stats);
-  res.writeHead(204);
-  res.end();
+  // Return the world that was read above: active painters apply it like a poll
+  // response, so they see others' strokes at flush cadence (~200ms) instead of
+  // waiting for the next poll. Costs no extra Redis commands — the grid was
+  // already fetched for validation. (It predates this batch's write; the
+  // client's pending-cell protection keeps its own strokes intact.)
+  sendJson(res, 200, { grid, state, now: Date.now() });
 };

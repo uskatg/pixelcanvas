@@ -511,7 +511,7 @@ function drawGrid() {
 // confirmation has come back.
 const pending = new Map();   // cellIndex -> { c, ts, ack }
 const sendQueue = new Map(); // cellIndex -> c
-let painting = false, lastKey = "";
+let painting = false, lastKey = "", lastPaintAt = 0;
 // Cells painted in the current stroke (idx + previous color), so an accidental
 // dot from the first finger of a pinch-zoom can be undone when the 2nd lands.
 let strokeStart = 0;
@@ -537,6 +537,7 @@ function paintAt(x, y) {
   pending.set(idx, { c: current, ts: Date.now(), ack: 0 });
   sendQueue.set(idx, current);
   drawCell(x, y);
+  lastPaintAt = Date.now(); // keeps the poll interval fast, see pollDelay()
 }
 // Undo the current stroke (used when a pinch-zoom starts): restore each cell's
 // previous color and queue that value so an already-flushed dot is corrected.
@@ -562,7 +563,7 @@ async function flushPaints() {
   const cells = [];
   for (const [idx, c] of sendQueue) cells.push({ x: idx % W, y: Math.floor(idx / W), c });
   sendQueue.clear();
-  const sentW = W, sentH = H;
+  const sentW = W, sentH = H, sentAt = Date.now();
   let ok = false;
   try {
     const r = await fetch("/api/paint", {
@@ -575,6 +576,19 @@ async function flushPaints() {
       for (const cell of cells) {
         const p = pending.get(cell.y * W + cell.x);
         if (p && p.c === cell.c) p.ack = t;
+      }
+      // Fast-path sync: a successful paint (200) returns the world it read, so
+      // while drawing we see others' strokes at flush cadence (~200ms) instead
+      // of waiting for the next poll. Own cells are still pending (acked after
+      // sentAt) and win over this grid. 204 = muted/frozen, no body.
+      if (r.status === 200) {
+        const data = await r.json().catch(() => null);
+        if (data && data.state) {
+          clockOffset = data.now - Date.now();
+          applyState(data.state);
+          if (sentAt >= lastGridStart) { applyGrid(data.grid, sentAt); lastGridStart = sentAt; }
+          updateSimilarity();
+        }
       }
     }
   } catch { /* handled below */ }
@@ -704,10 +718,22 @@ function select(i) {
 
 // ---- Live sync (polling) -----------------------------------------------------
 // The server is serverless (Vercel), so instead of SSE every client polls
-// /api/poll: grid + shared task/timer state + roster, about once per second.
-const POLL_MS = 1200;
+// /api/poll: grid + shared task/timer state + roster. The interval adapts:
+// fast while a round is live or this client painted recently (so others'
+// strokes show promptly), slow when idle — each poll costs ~4 Redis commands
+// against the Upstash quota. Painters additionally sync from the /api/paint
+// response of every ~200ms flush, see flushPaints().
+const POLL_MS = 1200;     // idle
+const POLL_MS_LIVE = 400; // live round or actively painting
+function pollDelay() {
+  const live = (curTask && deadline !== null && serverNow() < deadline) ||
+               Date.now() - lastPaintAt < 10000;
+  return live ? POLL_MS_LIVE : POLL_MS;
+}
 let clockOffset = 0;      // serverNow - localNow, so timers use server time
 let pollBusy = false, pollAgain = false;
+let lastGridStart = 0;    // fetch-start time of the newest applied grid — a poll
+                          // must not overwrite a fresher grid from a paint flush
 
 function serverNow() { return Date.now() + clockOffset; }
 
@@ -732,12 +758,16 @@ function applyGrid(encoded, pollStart) {
 // ---- Timelapse recording + replay -------------------------------------------
 // Every client records the shared grid string each poll during a round, then
 // plays it back on the time-up modal. Pure client-side; ~150 frames/round.
-let frames = [], recordRound = null, replayTimer = null;
+let frames = [], recordRound = null, replayTimer = null, lastFrameAt = 0;
 function recordFrame(encoded) {
   if (!curTask || deadline === null) return;
-  if (deadline !== recordRound) { recordRound = deadline; frames = []; } // new round
+  if (deadline !== recordRound) { recordRound = deadline; frames = []; lastFrameAt = 0; } // new round
+  // Live rounds poll every 400ms — cap the recording rate so a 3-minute round
+  // still fits in the 400-frame budget instead of stopping partway through.
+  if (Date.now() - lastFrameAt < 450) return;
   if (serverNow() < deadline + 1500 && frames.length < 400 && encoded.length === W * H) {
     frames.push(encoded);
+    lastFrameAt = Date.now();
   }
 }
 function drawReplayFrame(rctx, enc, scale) {
@@ -841,7 +871,9 @@ async function poll() {
     const data = await (await fetch("/api/poll" + q, { cache: "no-store" })).json();
     clockOffset = data.now - Date.now();
     applyState(data.state);
-    applyGrid(data.grid, started);
+    // Skip grids older than one a paint flush applied while this poll was in
+    // flight — briefly reverting others' newest strokes would flicker.
+    if (started >= lastGridStart) { applyGrid(data.grid, started); lastGridStart = started; }
     recordFrame(data.grid);
     renderRoster(data.players || []);
     updateSimilarity();
@@ -851,6 +883,13 @@ async function poll() {
   if (pollAgain) { pollAgain = false; poll(); }
 }
 function pollNow() { poll(); }
+
+// Self-scheduling poll loop — re-reads pollDelay() after every poll so the
+// cadence follows the round/painting state without restarting any interval.
+async function pollLoop() {
+  await poll();
+  setTimeout(pollLoop, pollDelay());
+}
 
 let rosterSig = ""; // last rendered roster — skip the rebuild when nothing changed,
                     // otherwise the avatars flash on every poll (~1.2s)
@@ -1267,7 +1306,7 @@ async function boot() {
     } catch {}
   }
   redrawAll();
-  setInterval(poll, POLL_MS);
+  setTimeout(pollLoop, pollDelay());
 }
 window.addEventListener("resize", () => { if (me || isBeamer) layout(); });
 // Coming back to a hidden tab: resync right away instead of waiting for the interval.
