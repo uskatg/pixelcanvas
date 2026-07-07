@@ -53,7 +53,11 @@ const server = http.createServer((req, res) => {
       ".webp": "image/webp", ".png": "image/png", ".jpg": "image/jpeg",
       ".svg": "image/svg+xml", ".ico": "image/x-icon",
     };
-    res.writeHead(200, { "Content-Type": types[ext] || "application/octet-stream" });
+    const headers = { "Content-Type": types[ext] || "application/octet-stream" };
+    // Phones must always load the newest app shell — a stale cached index.html
+    // keeps running old sync logic for the whole session.
+    if (ext === ".html") headers["Cache-Control"] = "no-store";
+    res.writeHead(200, headers);
     res.end(data);
   });
 });
