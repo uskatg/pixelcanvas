@@ -790,11 +790,11 @@ function playTimelapse() {
   const rctx = rc.getContext("2d");
   const total = frames.length;
   const step = Math.max(1, Math.round(total / 45)); // ~45 draws over the run
-  let i = 0;
+  let i = 0, hold = 0;
   replayTimer = setInterval(() => {
     if (i >= total) {
-      drawReplayFrame(rctx, frames[total - 1], scale); // land on the final frame
-      clearInterval(replayTimer); replayTimer = null;
+      if (hold === 0) drawReplayFrame(rctx, frames[total - 1], scale); // land on the final frame…
+      if (++hold >= 12) { i = 0; hold = 0; } // …hold it ~1s, then loop from the start
       return;
     }
     drawReplayFrame(rctx, frames[i], scale);
