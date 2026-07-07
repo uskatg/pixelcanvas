@@ -724,16 +724,19 @@ function select(i) {
 // against the Upstash quota. Painters additionally sync from the /api/paint
 // response of every ~200ms flush, see flushPaints().
 const POLL_MS = 1200;     // idle
-const POLL_MS_LIVE = 400; // live round or actively painting
+const POLL_MS_LIVE = 400; // live round, actively painting, or watching someone paint
 function pollDelay() {
   const live = (curTask && deadline !== null && serverNow() < deadline) ||
-               Date.now() - lastPaintAt < 10000;
+               Date.now() - lastPaintAt < 10000 ||
+               Date.now() - remoteActivityAt < 10000;
   return live ? POLL_MS_LIVE : POLL_MS;
 }
 let clockOffset = 0;      // serverNow - localNow, so timers use server time
 let pollBusy = false, pollAgain = false;
 let lastGridStart = 0;    // fetch-start time of the newest applied grid — a poll
                           // must not overwrite a fresher grid from a paint flush
+let remoteActivityAt = 0; // last time someone else's stroke arrived — watchers
+                          // (beamer, free-draw spectators) poll fast during it
 
 function serverNow() { return Date.now() + clockOffset; }
 
@@ -748,11 +751,16 @@ function applyGrid(encoded, pollStart) {
   for (const [k, p] of pending) {
     if ((p.ack && pollStart > p.ack) || now - p.ts > 10000) pending.delete(k);
   }
+  let remoteChange = false;
   for (let i = 0; i < encoded.length; i++) {
     const pend = pending.get(i);
     const want = pend ? pend.c : decodeCell(encoded[i]);
-    if (grid[i] !== want) { grid[i] = want; drawCell(i % W, Math.floor(i / W)); }
+    if (grid[i] !== want) {
+      grid[i] = want; drawCell(i % W, Math.floor(i / W));
+      if (!pend) remoteChange = true; // someone else painted (own cells are pending)
+    }
   }
+  if (remoteChange) remoteActivityAt = now;
 }
 
 // ---- Timelapse recording + replay -------------------------------------------
@@ -902,6 +910,9 @@ function renderRoster(list) {
     if (seen.has(k)) return false;
     seen.add(k); return true;
   });
+  // The server reads the roster from a Redis hash whose field order is not
+  // stable between polls — sort so rows don't swap places on every refresh.
+  players.sort((a, b) => a.name.localeCompare(b.name) || a.icon.localeCompare(b.icon));
   document.getElementById("count").textContent = players.length + " online";
   document.getElementById("beamercount").textContent = players.length + " online";
   const sig = lang + "\n" + players.map((p) =>
