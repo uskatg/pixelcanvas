@@ -46,7 +46,9 @@
     font: inherit; font-size: 12px; background: transparent; color: var(--text);
     border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; cursor: pointer;
   }
-  .taskbtn.active, #uploadBtn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .taskbtn.active, #uploadBtn.active, #beamerToggle.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+  #beamerToggle { display: inline-flex; align-items: center; padding: 4px 7px; }
+  #beamerToggle svg { width: 15px; height: 15px; display: block; }
 
   /* ---- Upload modal (custom reference image) ---- */
   #uploadModal { position: fixed; inset: 0; background: rgba(0,0,0,.85); display: none; align-items: center; justify-content: center; z-index: 45; padding: 20px; }
@@ -86,8 +88,12 @@
          palette or join lobby — the presenter's shared screen ---- */
   #beamerpanel { display: none; }
   body.beamer #players { display: block; width: clamp(180px, 24vw, 320px); }
-  body.beamer #players h3, body.beamer #playerlist { display: none; }
-  body.beamer #beamerpanel { display: flex; flex-direction: column; align-items: center; gap: 16px; padding-top: 8px; }
+  body.beamer #players h3, body.beamer #beamercount { display: none; }
+  body.beamer #beamerpanel { display: flex; flex-direction: column; align-items: center; gap: 16px; padding: 8px 0 18px; }
+  /* Roster under the QR code: bigger for the projector, at most 15 rows. */
+  body.beamer .player b { font-size: 15px; }
+  body.beamer .player img { width: 34px; height: 34px; }
+  body.beamer .player:nth-child(n+16) { display: none; }
   body.beamer .palette { display: none; }
   body.beamer #me, body.beamer #showJoin { display: none; }
   #beamerqr { background: #fff; padding: 12px; border-radius: 12px; line-height: 0; min-width: 120px; min-height: 120px; display: flex; align-items: center; justify-content: center; }
@@ -234,6 +240,7 @@
       <button class="joinbtn taskbtn adminonly" data-task="2">Bild 2</button>
       <button class="joinbtn adminonly" id="uploadBtn">Upload</button>
       <button class="joinbtn adminonly" id="clearHeader">Leeren</button>
+      <button class="joinbtn adminonly" id="beamerToggle" title="Beamer-Ansicht" aria-label="Beamer-Ansicht"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg></button>
       <span class="count" id="count">– online</span>
       <button class="joinbtn" id="showJoin">QR</button>
     </div>
@@ -262,12 +269,12 @@
     </div>
     <aside id="players">
       <h3>Spieler·innen</h3>
-      <div id="playerlist"></div>
       <div id="beamerpanel">
         <div id="beamerqr">…</div>
         <div id="beamerjoin">Scanne den QR-Code<br>zum Mitmalen</div>
         <div id="beamercount">– online</div>
       </div>
+      <div id="playerlist"></div>
     </aside>
   </div>
 
@@ -334,6 +341,7 @@ const I18N = {
     adminInvalid: "Admin-Token ungültig.", adminSpectator: "Admin-Token ungültig — Zuschauer-Modus.",
     upload: "Upload", uploadTitle: "Eigenes Bild hochladen", uploadPick: "Bild wählen",
     uploadHint: "Noch kein Bild gewählt", uploadTime: "Zeit:", cancel: "Abbrechen",
+    beamerLook: "Beamer-Ansicht",
     youSuffix: '" (du)"',
   },
   en: {
@@ -349,6 +357,7 @@ const I18N = {
     adminInvalid: "Invalid admin token.", adminSpectator: "Invalid admin token — spectator mode.",
     upload: "Upload", uploadTitle: "Upload your own image", uploadPick: "Choose image",
     uploadHint: "No image selected yet", uploadTime: "Time:", cancel: "Cancel",
+    beamerLook: "Beamer view",
     youSuffix: '" (you)"',
   },
 };
@@ -384,6 +393,7 @@ function applyLang() {
   set("#uploadTimeLabel", T.uploadTime);
   set("#uploadStart", T.start);
   set("#uploadCancel", T.cancel);
+  const bt = document.getElementById("beamerToggle"); if (bt) bt.title = T.beamerLook;
   if (typeof timerTick === "function") timerTick();       // refresh Start/Pause label
   if (typeof updateSimilarity === "function") updateSimilarity();
 }
@@ -415,6 +425,21 @@ const TASK_SECONDS = Math.max(5, parseInt(bootParams.get("t"), 10) || 180);
 // persistent QR). Combine with ?admin=<token> so the presenter's screen also
 // controls the round: /?admin=<token>&beamer=1
 const isBeamer = bootParams.get("beamer") === "1";
+
+// Beamer look (admin eye button): switches the host's screen into the same
+// projector look live — painting off, palette hidden, persistent QR — and back,
+// without reloading with ?beamer=1.
+let beamerLook = false;
+function toggleBeamerLook() {
+  if (isBeamer) return; // already a real beamer window
+  beamerLook = !beamerLook;
+  document.body.classList.toggle("beamer", beamerLook);
+  document.getElementById("beamerToggle").classList.toggle("active", beamerLook);
+  if (beamerLook && !document.getElementById("beamerqr").querySelector("img")) {
+    buildQR(document.getElementById("beamerqr"), 240);
+  }
+  layout(); // palette/panel visibility changed → available canvas space changed
+}
 
 // Stable per-device id for the presence roster.
 let clientId = localStorage.getItem("pc_id");
@@ -578,7 +603,7 @@ window.addEventListener("pagehide", () => {
   navigator.sendBeacon("/api/paint", new Blob([JSON.stringify({ cells, id: clientId })], { type: "application/json" }));
 });
 canvas.addEventListener("pointerdown", (e) => {
-  if (isBeamer) return; // projector view is display-only
+  if (isBeamer || beamerLook) return; // projector view is display-only
   e.preventDefault();
   if (touches.size >= 2 || pinch) return; // second finger = zoom, not paint
   painting = true; lastKey = "";
@@ -827,6 +852,8 @@ async function poll() {
 }
 function pollNow() { poll(); }
 
+let rosterSig = ""; // last rendered roster — skip the rebuild when nothing changed,
+                    // otherwise the avatars flash on every poll (~1.2s)
 function renderRoster(list) {
   // Dedupe identical name+icon (e.g. the same person on two tabs).
   const seen = new Set();
@@ -838,6 +865,13 @@ function renderRoster(list) {
   });
   document.getElementById("count").textContent = players.length + " online";
   document.getElementById("beamercount").textContent = players.length + " online";
+  const sig = lang + "\n" + players.map((p) =>
+    [p.id, p.name, p.icon,
+     p.id && mutedIds.has(p.id) ? 1 : 0,
+     me && p.name === me.name && p.icon === me.icon ? 1 : 0].join("|")
+  ).join("\n");
+  if (sig === rosterSig) return;
+  rosterSig = sig;
   const el = document.getElementById("playerlist");
   el.innerHTML = "";
   players.forEach((p) => {
@@ -1144,6 +1178,7 @@ function setupControls() {
   document.getElementById("canvasReset").onclick = clearCanvas;
   document.getElementById("clearHeader").onclick = clearCanvas;
   document.getElementById("langToggle").onclick = toggleLang;
+  document.getElementById("beamerToggle").onclick = toggleBeamerLook;
   document.getElementById("uploadBtn").onclick = openUpload;
   document.getElementById("uploadCancel").onclick = closeUpload;
   document.getElementById("uploadStart").onclick = startUpload;
